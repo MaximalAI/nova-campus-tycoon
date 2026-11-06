@@ -170,6 +170,7 @@ class World {
     if (door.side === "west") { sign.position.set(x0 - off, WALL_H + 0.9, cz); sign.rotation.y = -Math.PI / 2; }
     if (door.side === "south") { sign.position.set(cx, WALL_H + 0.9, z1 + off); }
     s.add(sign);
+    parts.sign = sign; // hidden together with the roof, so it never blocks the view from inside
     // Awning over the door
     const aw = this.box(door.side === "south" ? 4.4 : 1.4, 0.12, door.side === "south" ? 1.4 : 4.4, b.trim,
       door.side === "east" ? x1 + 0.7 : door.side === "west" ? x0 - 0.7 : cx, 2.35, door.side === "south" ? z1 + 0.7 : cz);
@@ -239,6 +240,50 @@ class World {
     return m;
   }
 
+  // Open storage shelf with one board per item. The crates on it show the real stock
+  // (updated every frame from the view), instead of boxes stuck inside a solid block.
+  storageShelf(shop, x, z, rotY, items) {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z); group.rotation.y = rotY;
+    this.scene.add(group);
+    const wood = 0x6d4c41, parent = { parent: group };
+    const parts = [
+      this.box(2.2, 1.9, 0.06, wood, 0, 0.95, -0.27, parent),
+      this.box(0.06, 1.9, 0.6, wood, -1.07, 0.95, 0, parent),
+      this.box(0.06, 1.9, 0.6, wood, 1.07, 0.95, 0, parent),
+    ];
+    const levels = [0.06, 0.69, 1.32];
+    for (const y of [...levels, 1.9]) parts.push(this.box(2.2, 0.05, 0.6, 0x8d6e63, 0, y, 0, parent));
+    const colors = { coffee_beans: 0x6f4e37, oranges: 0xff9f1c, nata: 0xf4c95d, tea_leaves: 0x6a994e, croissant_dough: 0xe9b872 };
+    this.shelfCrates = this.shelfCrates || {};
+    this.shelfCrates[shop] = {};
+    items.forEach((item, k) => {
+      const crates = [];
+      for (const cx of [-0.68, 0, 0.68]) {
+        const crate = new THREE.Group();
+        crate.position.set(cx, levels[k] + 0.03, 0.02);
+        this.box(0.56, 0.3, 0.46, 0xa1887f, 0, 0.15, 0, { parent: crate });
+        this.box(0.5, 0.06, 0.4, colors[item] || 0xcccccc, 0, 0.31, 0, { parent: crate, cast: false });
+        group.add(crate);
+        crate.visible = false;
+        crates.push(crate);
+      }
+      this.shelfCrates[shop][item] = crates;
+    });
+    return parts;
+  }
+  updateShelves(view) {
+    for (const [shop, items] of Object.entries(this.shelfCrates || {})) {
+      const stock = view.shops[shop].owner === "player" ? view.shops[shop].stock : null;
+      for (const [item, crates] of Object.entries(items)) {
+        const units = stock && stock[item] ? stock[item].units : 0;
+        const packs = Math.ceil(units / this.game.config.wholesale_items[item].base_units);
+        const show = view.shops[shop].owner === "bot" ? 3 : Math.min(3, packs);
+        crates.forEach((c, i) => { c.visible = i < show; });
+      }
+    }
+  }
+
   buildCafeInterior() {
     const g = this.game;
     // Counter with a gap at the south end so the player can get behind it
@@ -251,8 +296,7 @@ class World {
     const juicer = this.station("cafe", "juicer", -39.1, -1.6, Math.PI / 2);
     const display = this.station("cafe", "display_case", -39.1, 0.6, Math.PI / 2);
     this.collide(-39.85, -38.6, -4.4, 1.4);
-    const shelf = this.box(0.6, 1.9, 2.2, 0x6d4c41, -39.5, 0.95, 3.6);
-    for (let i = 0; i < 3; i++) this.box(0.5, 0.3, 0.5, [0xa1887f, 0xffb74d, 0x81c784][i], -39.45, 0.55 + i * 0.6, 3.0 + i * 0.5);
+    const shelf = this.storageShelf("cafe", -39.5, 3.6, Math.PI / 2, ["coffee_beans", "oranges", "nata"]);
     this.collide(-39.85, -39.15, 2.5, 4.7);
     const planBoard = this.board("DAY PLAN", -37.4, -5.7, 0, "#2a9d8f");
     const upBoard = this.board("UPGRADES", -31.5, -5.7, 0, "#e76f51");
@@ -274,7 +318,7 @@ class World {
       enabled: () => g.view && g.view.shops.cafe.owner === "player", action: () => g.flow.openPlanning() });
     this.addInteractable({ id: "upgrade_board", pos: { x: -31.5, z: -4.9 }, radius: 2.7, meshes: [upBoard], label: () => "Upgrades & staff",
       action: () => g.flow.openUpgrades() });
-    this.addInteractable({ id: "storage_cafe", pos: { x: -38.6, z: 3.6 }, meshes: [shelf], label: () => "Stock the goods",
+    this.addInteractable({ id: "storage_cafe", pos: { x: -38.6, z: 3.6 }, meshes: shelf, label: () => "Stock the goods",
       enabled: () => g.flow.bagHasItemsFor("cafe"), action: () => g.flow.openStock("cafe") });
     this.addInteractable({ id: "register_cafe", pos: { x: -35.8, z: -0.6 }, meshes: [register, counter], label: () => g.flow.registerLabel(),
       action: () => g.flow.useRegister("cafe") });
@@ -310,7 +354,7 @@ class World {
     const kettle = this.station("rival", "kettle", -1.4, -26.1, 0);
     const display = this.station("rival", "display_case", 0.6, -26.1, 0);
     this.collide(-4.2, 1.4, -26.85, -25.6);
-    const shelf = this.box(2.2, 1.9, 0.6, 0x6d4c41, 4.2, 0.95, -26.4);
+    const shelf = this.storageShelf("rival", 4.2, -26.4, 0, ["coffee_beans", "tea_leaves", "croissant_dough"]);
     this.collide(3.1, 5.3, -26.85, -26.0);
     for (const x of [-3.5, 3.5]) {
       this.box(1.2, 0.08, 1.2, 0xffffff, x, 0.78, -18.2);
@@ -321,7 +365,7 @@ class World {
     const owned = () => g.view && g.view.shops.rival.owner === "player";
     this.addInteractable({ id: "register_rival", pos: { x: 0.6, z: -21.9 }, meshes: [register], label: () => g.flow.registerLabel(),
       enabled: owned, action: () => g.flow.useRegister("rival") });
-    this.addInteractable({ id: "storage_rival", pos: { x: 4.2, z: -25.5 }, meshes: [shelf], label: () => "Stock the goods",
+    this.addInteractable({ id: "storage_rival", pos: { x: 4.2, z: -25.5 }, meshes: shelf, label: () => "Stock the goods",
       enabled: () => owned() && g.flow.bagHasItemsFor("rival"), action: () => g.flow.openStock("rival") });
     this.addInteractable({ id: "station_rival_coffee", pos: { x: -3.4, z: -25.1 }, meshes: coffee, label: () => "Make a coffee",
       enabled: rivalManual, action: () => g.flow.openStation("rival", "coffee") });

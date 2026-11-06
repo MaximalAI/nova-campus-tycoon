@@ -4,6 +4,7 @@ import pytest
 
 import logic
 import students as st
+from config import CONFIG
 from logic import GameError
 
 
@@ -118,7 +119,8 @@ def test_patience_runs_out():
     assert res["toast"] == "A customer left"
     assert state["current_order"] is None
     assert state["stats"]["shops"]["cafe"]["lost"] == 1
-    assert state["reputation"] == 49
+    assert state["reputation"] == 50 + CONFIG["reputation"]["customer_lost"]
+    assert res["rep_delta"] == CONFIG["reputation"]["customer_lost"]
 
 
 def test_closing_cancels_order_and_sends_queue_away():
@@ -187,10 +189,11 @@ def test_reputation_scales_next_days_factor():
     for spot in ("counter", "coffee_machine", "tables", "floor"):  # no cleaning penalty
         state, _ = go(state, 20.5, type="clean", spot=spot)
     state, _ = go(state, 21.0, type="next_day")
-    assert state["rep_factor"] == pytest.approx(1.2)
-    assert logic.shop_factor(state, "cafe") == pytest.approx(1.2)
+    lo, hi = CONFIG["reputation"]["factor_range"]
+    assert state["rep_factor"] == pytest.approx(hi)
+    assert logic.shop_factor(state, "cafe") == pytest.approx(hi)
     state["reputation"] = 0
-    assert logic.reputation_factor(0) == pytest.approx(0.8)
+    assert logic.reputation_factor(0) == pytest.approx(lo)
 
 
 def test_game_over_when_money_is_gone():

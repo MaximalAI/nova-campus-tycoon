@@ -40,6 +40,7 @@ class Flow {
       if (!this.game.isManual("cafe")) return "Your staff serve the customers. Use the time for upgrades or growth.";
     }
     if (this.v.day_state === "WHOLESALE_SHOPPING" && !this.v.in_wholesaler) return "Walk into the wholesaler.";
+    if (this.canSkipToOpening()) return "Set your prices at the counter, then press ⏩ Start the day (top right).";
     return this.v.objective;
   }
 
@@ -85,19 +86,34 @@ class Flow {
   }
 
   // ------------------------------------------------------------- P00 title
-  showTitle(hasSave) {
+  showTitle(hasSave, info) {
     const ui = this.game.ui;
+    const help = "<b>W A S D</b> walk, <b>Shift</b> run, <b>click the game</b> to look around with the mouse (Esc frees it), " +
+      "<b>E</b> or click to use things, <b>Enter</b> confirm, <b>Esc</b> cancel, <b>Tab</b> lists, <b>P</b> pause.";
     ui.showDialog({
       id: "P00", noEsc: true,
       custom: (box) => {
         box.appendChild(el("div", "title-logo", "☕ Nova Campus<br>Tycoon"));
         box.appendChild(el("div", "title-sub", "Run your café, beat the competition and take over the whole campus."));
-        box.appendChild(el("div", "dlg-text",
-          "<b>W A S D</b> or arrow keys to walk, <b>Shift</b> to run, <b>mouse</b> to look around (click into the game), " +
-          "<b>E</b> or click to use things, <b>Enter</b> to confirm, <b>Esc</b> to cancel, <b>Tab</b> shopping list, <b>P</b> pause."));
+        if (hasSave && info) box.appendChild(el("div", "save-info", `💾 Saved game: day ${info.day} · ${euro(info.money)}`));
+        box.appendChild(el("div", "dlg-text", help));
       },
-      extra: hasSave ? [{ label: "Continue", action: () => { ui.closeDialog(); this.game.startSession("continue_game"); } }] : [],
-      primary: { label: "New game", action: () => this.game.startSession("new_game") },
+      // With a saved game, Enter continues it; a new game asks first (it replaces the save).
+      extra: hasSave ? [{ label: "New game", action: () => this.confirmRestart() }] : [],
+      primary: hasSave
+        ? { label: "Continue", action: () => this.game.startSession("continue_game") }
+        : { label: "New game", action: () => this.game.startSession("new_game") },
+    });
+  }
+  confirmRestart() {
+    const ui = this.game.ui;
+    const back = this.v ? () => this.openPause() : () => this.showTitle(this.game.titleInfo.hasSave, this.game.titleInfo.info);
+    ui.queue = []; if (ui.current) { ui.current.busy = false; ui.current.onClose = null; ui.closeDialog(); }
+    ui.showDialog({
+      id: "P21", icon: "🔄", title: "Start a new game?", urgent: true, noEsc: true,
+      text: "Your saved game will be replaced. Day, money, reputation, upgrades and cafés start from zero again.",
+      secondary: { label: "Back", action: () => setTimeout(back, 0) },
+      primary: { label: "Yes, start over", action: () => { this.game.clock.paused = false; this.game.startSession("new_game"); } },
     });
   }
 
@@ -305,6 +321,14 @@ class Flow {
   askOpen() {
     const v = this.v;
     if (v.open || v.closed) return;
+    if (this.game.clock.t < 7 && this.canSkipToOpening()) {
+      return this.game.ui.showDialog({
+        id: "P08", icon: "⏩", title: "Start the day now?", unique: true,
+        text: "Everything is ready. Jump straight to 08:00 and open the café, or wait and look around first. The ⏩ button at the top right does the same later.",
+        secondary: { label: "Not yet" },
+        primary: { label: "⏩ Start the day", action: () => this.skipToOpening() },
+      });
+    }
     const waiting = this.queues.cafe.length;
     this.game.ui.showDialog({
       id: "P08", icon: "🚪", title: "Open the café?", unique: true,
@@ -322,14 +346,15 @@ class Flow {
     this.p09For = sid;
     const items = a.order || [];
     const chips = items.map((p) => `<span class="chip">${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}</span>`).join("") +
-      (a.soldOut || []).map((p) => `<span class="chip off">${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}</span>`).join("");
+      (a.soldOut || []).map((p) => `<span class="chip off">${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}<b>SOLD OUT</b></span>`).join("");
     const total = items.reduce((s, p) => s + this.v.shops[shop].prices[p], 0);
     const dlg = {
       id: "P09", icon: "🙋", title: `New order - ${a.info.name}`, unique: true,
       valid: () => this.queues[shop][0] === sid && !this.v.current_order && a.mode === "queue",
       body: (body) => {
         body.appendChild(el("div", "chips", chips));
-        if ((a.soldOut || []).length) body.appendChild(el("div", "note", "Crossed out = sold out."));
+        if ((a.soldOut || []).length) body.appendChild(el("div", "note",
+          "Red = the customer wanted it, but your stock is empty (0 left). Buy more at the wholesaler tomorrow."));
         const pb = el("div", "progress"); const bar = el("div"); pb.appendChild(bar); body.appendChild(pb);
         const f = clamp(a.patience / a.patienceMax, 0, 1);
         bar.style.width = `${f * 100}%`;
@@ -343,6 +368,7 @@ class Flow {
         a.mode = "rejected";
         this.send("reject", { shop, student: sid }, (r) => {
           this.p09For = null;
+          if (r.ok) this.repToast(r.result.rep_delta, "turned away");
           this.removeFromQueue(shop, sid);
           a.emote = { icon: "😕", until: performance.now() + 3000 };
           this.leaveShop(a, shop, r.ok ? r.result : { action: "wander" });
@@ -387,7 +413,11 @@ class Flow {
         const pb = el("div", "progress"); bar = el("div"); pb.appendChild(bar); body.appendChild(pb);
         body.appendChild(el("div", "note", `Takes ${spec.prep_minutes} game minute${spec.prep_minutes === 1 ? "" : "s"}`));
       },
-      secondary: { label: "Cancel" },
+      // Cancel also works while the product is being made: nothing is used up then.
+      cancelWhileBusy: true,
+      secondary: { label: "Cancel", action: () => {
+        if (dlg.busy) { this.progress = null; dlg.busy = false; this.game.ui.toast(`${spec.name} cancelled - nothing used`); }
+      } },
       primary: { label: verbs[product], action: () => {
         dlg.busy = true;
         this.game.ui.primaryButton.disabled = true;
@@ -416,17 +446,74 @@ class Flow {
     this.game.ui.showDialog({
       id: "P13", icon: "🤝", title: `Hand over the order - ${a ? a.info.name : ""}`,
       text: "Order against tray:",
-      body: (body) => body.appendChild(el("div", "chips", chips)),
-      secondary: { label: "Cancel" },
-      primary: { label: "Hand over", action: () => {
+      body: (body) => {
+        body.appendChild(el("div", "chips", chips));
+        if (v.tray.length) body.appendChild(el("div", "note", "Something wrong on the tray? Throw it away and make the right product."));
+      },
+      secondary: { label: "Back" },
+      extra: [
+        ...(v.tray.length ? [{ label: "🗑 Throw away tray", action: () => { this.game.ui.closeDialog(); this.discardTray(); } }] : []),
+        { label: "✖ Cancel order", action: () => { this.game.ui.closeDialog(); this.confirmCancelOrder(); } },
+      ],
+      primary: { label: "Hand over", disabled: !v.tray.length, action: () => {
         this.send("handover", { shop, student: order.student, player_inside: this.playerIn(shop) }, (r) => {
           if (!r.ok) return this.game.ui.toast(r.error, true);
           this.game.ui.toast(r.result.toast, !r.result.correct);
+          this.repToast(r.result.rep_delta);
           this.removeFromQueue(shop, order.student);
           if (a) { a.emote = { icon: r.result.correct ? "😊" : "😠", until: performance.now() + 3500 }; this.exitShop(a, shop); }
         });
       } },
     });
+  }
+
+  discardTray() {
+    const order = this.v.current_order;
+    if (!order || !this.v.tray.length) return;
+    this.send("discard_tray", { shop: order.shop, player_inside: this.playerIn(order.shop) }, this.ok());
+  }
+  confirmCancelOrder() {
+    const order = this.v.current_order;
+    if (!order) return;
+    const a = this.agents.get(order.student);
+    this.game.ui.showDialog({
+      id: "P22", icon: "✖", title: "Cancel this order?", unique: true,
+      text: `${a ? esc(a.info.name) : "The customer"} leaves without buying. What is on the tray is lost and your reputation drops by ${-this.cfg.reputation.order_cancelled}.`,
+      secondary: { label: "Keep serving" },
+      primary: { label: "Cancel order", action: () => this.cancelOrder() },
+    });
+  }
+  cancelOrder() {
+    const order = this.v.current_order;
+    if (!order) return;
+    const shop = order.shop, a = this.agents.get(order.student);
+    this.send("cancel_order", { shop, player_inside: this.playerIn(shop) }, (r) => {
+      if (!r.ok) return this.game.ui.toast(r.error, true);
+      this.game.ui.toast(r.result.toast, true);
+      this.repToast(r.result.rep_delta);
+      this.removeFromQueue(shop, order.student);
+      if (a) { a.emote = { icon: "😠", until: performance.now() + 3500 }; this.leaveShop(a, shop, r.result); }
+    });
+  }
+  // Reputation changes are always shown, so you see why it goes up or down.
+  repToast(delta, why = "") {
+    if (!delta) return;
+    const d = Math.round(delta * 10) / 10;
+    this.game.ui.toast(`Reputation ${d > 0 ? "+" : ""}${d}${why ? ` (${why})` : ""}`, d < 0);
+  }
+
+  // -------------------------------------------------------- start the day early
+  canSkipToOpening() {
+    const v = this.v;
+    return !!v && v.status === "running" && v.day_state === "SET_PRICES" && !v.open && !v.closed &&
+      this.game.clock.t < this.cfg.time.open && !Object.keys(v.bag).length;
+  }
+  skipToOpening() {
+    if (!this.canSkipToOpening()) return;
+    this.game.clock.t = this.cfg.time.open; // the 08:00 tick opens the café
+    this.game.clock.paused = false;
+    this.game.ui.toast("Jumped to 08:00 - your café opens");
+    this.game.ui.updateHud();
   }
 
   // -------------------------------------------------------- P14/P15 closing
@@ -458,43 +545,132 @@ class Flow {
   }
 
   // -------------------------------------------------------- P16 summary
+  // Four tabs: today's result, stock movements, the competitor, the last days.
   openSummary() {
     const s = this.v.summary;
     if (!s) return;
-    const products = this.cfg.products;
-    this.game.ui.showDialog({
-      id: "P16", icon: "📊", title: `Daily summary - day ${s.day}`, unique: true, noEsc: true,
-      rows: [
-        { label: "Revenue", value: euro(s.revenue), vcls: "good" },
-        { label: "Purchases", value: euro(-s.purchase_cost) },
-        { label: "Upgrades & staff", value: euro(-s.spending) },
-        { label: "<b>Profit</b>", value: euro(s.profit), cls: "total", vcls: s.profit >= 0 ? "good" : "bad" },
-        { label: "Spoiled goods (part of purchases)", value: euro(s.spoiled_value), vcls: s.spoiled_value ? "bad" : "" },
-        { label: "Customers served / lost", value: `${s.served} / ${s.lost}` + (s.wrong ? ` · ${s.wrong} wrong` : "") },
-        { label: "Reputation", value: `${s.reputation} / 100` },
-        { label: "Market share", value: `${Math.round(s.market_share * 100)} %` },
-        { label: "Cash", value: euro(s.money) },
-      ],
+    let tab = "today";
+    const dlg = {
+      id: "P16", icon: "📊", title: `Daily summary - day ${s.day}`, unique: true, noEsc: true, wide: true,
       body: (body) => {
-        const keys = [...new Set([...Object.keys(s.plan), ...Object.keys(s.sold)])].filter((p) => (s.plan[p] || s.sold[p]));
-        if (!keys.length) return;
-        const max = Math.max(1, ...keys.map((p) => Math.max(s.plan[p] || 0, s.sold[p] || 0)));
-        const bars = el("div", "bars");
-        for (const p of keys) {
-          const b = el("div", "bar");
-          b.innerHTML = `<div class="pair">` +
-            `<span class="col plan" style="height:${(s.plan[p] || 0) / max * 70}px"></span>` +
-            `<span class="col sold" style="height:${(s.sold[p] || 0) / max * 70}px"></span></div>${products[p].icon} ${s.sold[p] || 0}/${s.plan[p] || 0}`;
-          bars.appendChild(b);
+        const tabs = el("div", "tabs");
+        const content = el("div", "dlg-scroll");
+        const names = { today: "Today", stock: "Stock", competitor: "Competitor", history: "Last days" };
+        const draw = () => {
+          tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+          content.innerHTML = "";
+          ({ today: () => this.summaryToday(content, s), stock: () => this.summaryStock(content, s),
+            competitor: () => this.summaryCompetitor(content, s), history: () => this.summaryHistory(content) })[tab]();
+        };
+        for (const [key, label] of Object.entries(names)) {
+          const b = el("button", "", label); b.dataset.tab = key;
+          b.onclick = () => { tab = key; draw(); };
+          tabs.appendChild(b);
         }
-        body.appendChild(el("div", "note", "<b>Sold vs. plan</b> (grey = plan, green = sold)"));
-        body.appendChild(bars);
+        body.append(tabs, content);
+        draw();
       },
       primary: { label: this.v.status === "running" ? "Next day" : "Continue", action: () => {
         if (this.v.status !== "running") return this.openEnd();
         this.game.fade(() => this.send("next_day", {}, this.ok()));
       } },
-    });
+    };
+    this.game.ui.showDialog(dlg);
+  }
+  table(head, rows) {
+    return `<table class="sum-table"><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr>` +
+      rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("") + "</table>";
+  }
+  signed(n, fmt = (x) => x) { return n > 0 ? `<span class="pos">+${fmt(n)}</span>` : n < 0 ? `<span class="neg">${fmt(n)}</span>` : "0"; }
+  summaryToday(box, s) {
+    const products = this.cfg.products;
+    const money = [
+      ["Sales", euro(s.revenue)],
+      ["Tips", euro(s.tips || 0)],
+      ["Purchases", euro(-s.purchase_cost)],
+      ["Upgrades & staff", euro(-s.spending)],
+      ["<b>Profit</b>", `<b>${this.signed(s.profit, euro)}</b>`],
+      ["Spoiled goods (part of purchases)", euro(s.spoiled_value)],
+      ["Cash tonight", euro(s.money)],
+    ];
+    const people = [
+      ["Customers served", s.served],
+      ["Lost (left unhappy)", s.lost],
+      ["... of them: sold out", s.sold_out || 0],
+      ["Wrong orders", s.wrong],
+      ["Thrown away", s.wasted || 0],
+      ["Reputation", `${s.reputation} / 100`],
+      ["Market share", `${Math.round(s.market_share * 100)} %`],
+    ];
+    const grid = el("div", "sum-grid");
+    grid.appendChild(el("div", "", `<div class="sum-h">💶 Money</div>` + this.table(["", ""], money)));
+    grid.appendChild(el("div", "", `<div class="sum-h">🙋 Customers</div>` + this.table(["", ""], people)));
+    box.appendChild(grid);
+    const keys = [...new Set([...Object.keys(s.plan), ...Object.keys(s.sold)])].filter((p) => (s.plan[p] || s.sold[p]));
+    if (!keys.length) return;
+    const max = Math.max(1, ...keys.map((p) => Math.max(s.plan[p] || 0, s.sold[p] || 0)));
+    const bars = el("div", "bars");
+    for (const p of keys) {
+      const b = el("div", "bar");
+      b.innerHTML = `<div class="pair">` +
+        `<span class="col plan" style="height:${(s.plan[p] || 0) / max * 70}px"></span>` +
+        `<span class="col sold" style="height:${(s.sold[p] || 0) / max * 70}px"></span></div>${products[p].icon} ${s.sold[p] || 0}/${s.plan[p] || 0}`;
+      bars.appendChild(b);
+    }
+    box.appendChild(el("div", "sum-h", "Sold vs. plan <span class=\"sub\">(grey = plan, green = sold)</span>"));
+    box.appendChild(bars);
+  }
+  summaryStock(box, s) {
+    const items = this.cfg.wholesale_items;
+    const report = s.stock || {};
+    if (!Object.keys(report).length) { box.appendChild(el("div", "note", "No stock data for this day.")); return; }
+    for (const [shop, rows] of Object.entries(report)) {
+      const lines = Object.entries(rows).map(([i, r]) => [
+        `${items[i].icon} ${esc(items[i].name)}`, r.open, r.in ? `+${r.in}` : "0", r.used ? `-${r.used}` : "0",
+        r.spoiled ? `<span class="neg">-${r.spoiled}</span>` : "0", `<b>${r.close}</b>`, this.signed(r.change),
+      ]);
+      box.appendChild(el("div", "sum-h", `📦 ${esc(this.shopName(shop))}`));
+      box.appendChild(el("div", "", this.table(["Item", "Start", "In", "Used", "Spoiled", "End", "Change"], lines)));
+    }
+    box.appendChild(el("div", "note", "Units: portions of coffee, single oranges, pieces of pastry, tea bags. Spoiled goods are thrown away at night."));
+  }
+  summaryCompetitor(box, s) {
+    const products = this.cfg.products;
+    const c = s.competitor;
+    if (!c) {
+      box.appendChild(el("div", "note", `You own ${esc(this.shopName("rival"))}. Its numbers are part of your results now (see Today and Stock).`));
+      return;
+    }
+    const share = (rev) => (s.revenue + c.revenue ? Math.round(rev / (s.revenue + c.revenue) * 100) : 0) + " %";
+    box.appendChild(el("div", "sum-h", `🏪 You vs. ${esc(c.name)}`));
+    box.appendChild(el("div", "", this.table(["", "You", esc(c.name)], [
+      ["Customers served", s.served, c.served],
+      ["Customers lost", s.lost, c.lost],
+      ["Sales", euro(s.revenue), euro(c.revenue)],
+      ["Market share", share(s.revenue), share(c.revenue)],
+    ])));
+    const prices = s.prices || {};
+    const all = [...new Set([...Object.keys(prices.cafe || {}), ...Object.keys(c.prices)])];
+    box.appendChild(el("div", "sum-h", "🏷️ Prices today"));
+    box.appendChild(el("div", "", this.table(["Product", "You", esc(c.name)], all.map((p) => [
+      `${products[p].icon} ${esc(products[p].name)}`,
+      prices.cafe && prices.cafe[p] != null ? euro(prices.cafe[p]) : "-",
+      c.prices[p] != null ? euro(c.prices[p]) : "-",
+    ]))));
+    const sold = Object.entries(c.sold).map(([p, n]) => `${products[p].icon} ${n}`).join(" &nbsp; ") || "nothing";
+    box.appendChild(el("div", "note", `They sold: ${sold}`));
+  }
+  summaryHistory(box) {
+    const days = this.v.history || [];
+    if (!days.length) { box.appendChild(el("div", "note", "No finished days yet.")); return; }
+    box.appendChild(el("div", "sum-h", "📈 The last days"));
+    box.appendChild(el("div", "", this.table(
+      ["Day", "Sales", "Profit", "Served", "Lost", "Rep.", "Cash", "Competitor sales"],
+      days.slice().reverse().map((d) => [
+        d.day, euro(d.revenue + (d.tips || 0)), this.signed(d.profit, euro), d.served, d.lost, d.reputation, euro(d.money),
+        d.competitor ? `${euro(d.competitor.revenue)} (${d.competitor.served})` : "yours",
+      ]),
+    )));
   }
 
   // -------------------------------------------------------- P17 competitor
@@ -583,9 +759,12 @@ class Flow {
     g.clock.paused = true;
     g.ui.showDialog({
       id: "P20", icon: "⏸️", title: "Paused", urgent: true,
-      text: "Everything stands still: clock, students and progress bars. Your game is saved automatically.",
+      text: "Everything stands still: clock, students and progress bars. Your game is saved automatically after every action, so you can close the browser and continue later.",
       onClose: () => { g.clock.paused = false; },
-      extra: [{ label: "Save & quit", cls: "secondary", action: () => { g.ui.closeDialog(); g.startSession("quit"); } }],
+      extra: [
+        { label: "🔄 New game", cls: "secondary", action: () => this.confirmRestart() },
+        { label: "Save & quit", cls: "secondary", action: () => { g.ui.closeDialog(); g.startSession("quit"); } },
+      ],
       primary: { label: "Resume" },
     });
   }
@@ -598,7 +777,7 @@ class Flow {
     for (const mark of TICKS) {
       if (t + 1e-6 >= mark && !this.sentTicks.has(mark)) {
         this.sentTicks.add(mark);
-        this.send("tick", {}, (r) => {
+        this.send("tick", { t: Math.max(t, mark) }, (r) => {
           if (!r.ok) return;
           const res = r.result;
           if (res.toast) this.game.ui.toast(res.toast);
@@ -695,6 +874,9 @@ class Flow {
     }
     this.queues[shop].push(a.id); // reserve the slot right away
     a.mode = "queue";
+    // A good reputation makes customers of your cafés wait longer.
+    const perk = this.v.shops[shop].owner === "player" && this.v.rep_perks ? this.v.rep_perks.patience : 1;
+    a.patienceMax = a.info.traits.patience * perk;
     a.patience = a.patienceMax;
     a.inside = false;
     this.send("join_queue", { student: a.id, shop }, (r) => {
@@ -809,7 +991,10 @@ class Flow {
     this.send("patience_expired", { student: a.id, shop }, (r) => {
       a.expiring = false;
       const ui = this.game.ui;
-      if (r.ok && r.result.toast && this.v.shops[shop].owner === "player") ui.toast(r.result.toast, true);
+      if (r.ok && r.result.toast && this.v.shops[shop].owner === "player") {
+        ui.toast(r.result.toast, true);
+        this.repToast(r.result.rep_delta, "waited too long");
+      }
       if (this.p09For === a.id && ui.current?.id === "P09") ui.closeDialog();
       if (["P10", "P11", "P12", "P13"].includes(ui.current?.id) && !this.v.current_order) {
         this.progress = null; ui.current.busy = false; ui.closeDialog();
@@ -822,7 +1007,7 @@ class Flow {
 
   updateCounter(shop, dtGameMin) {
     const v = this.v;
-    if (!v.open) return;
+    if (!v.open || this.game.clock.t >= this.cfg.time.close) return;
     const sid = this.queues[shop][0];
     const a = sid && this.agents.get(sid);
     if (!a || a.path.length || !a.inside || a.expiring) return;
@@ -844,7 +1029,13 @@ class Flow {
           this.removeFromQueue(shop, sid);
           const got = r.ok ? r.result.items : [];
           a.emote = { icon: got.length ? "😊" : "😞", until: performance.now() + 3500 };
-          if (got.length && v.shops[shop].owner === "player") this.game.ui.toast(`${this.shopName(shop)}: +${euro(r.result.amount)}`);
+          if (got.length && v.shops[shop].owner === "player") {
+            this.game.ui.toast(`${this.shopName(shop)}: +${euro(r.result.amount)}` + (r.result.tip ? ` (+${euro(r.result.tip)} tip)` : ""));
+          }
+          if (r.ok && !got.length && v.shops[shop].owner === "player") {
+            this.game.ui.toast(`${this.shopName(shop)}: sold out - the customer leaves`, true);
+            this.repToast(r.result.rep_delta, "sold out");
+          }
           this.exitShop(a, shop);
         });
       }
@@ -858,6 +1049,11 @@ class Flow {
         if (r.result.leaves) {
           this.removeFromQueue(shop, sid);
           a.emote = { icon: "😞", until: performance.now() + 3000 };
+          if (v.shops[shop].owner === "player") {
+            const names = (r.result.sold_out || []).map((p) => this.cfg.products[p].name).join(", ");
+            this.game.ui.toast(`Sold out: ${names} - the customer leaves`, true);
+            this.repToast(r.result.rep_delta, "sold out");
+          }
           this.leaveShop(a, shop, r.result.decision);
           return;
         }

@@ -1,4 +1,4 @@
-"""All balancing values for Nova Campus Tycoon v2 in one place.
+"""All balancing values for Nova Campus Tycoon in one place.
 
 Money is in cents. Game time is in hours (5.5 = 05:30). Durations of actions
 are in game minutes; at 1x speed one game minute lasts one real second.
@@ -42,11 +42,18 @@ CONFIG = {
     "max_queue": 4,
     "reputation": {
         "start": 50,
-        "factor_range": [0.8, 1.2],
+        # What a good reputation brings (v4): more customers choose your café,
+        # customers wait longer and happy customers leave a tip.
+        "factor_range": [0.7, 1.3],  # demand factor at reputation 0 and 100
+        "patience_range": [0.75, 1.35],  # patience multiplier at reputation 0 and 100
+        "tips": [[60, 0.05], [75, 0.10], [90, 0.15]],  # from this reputation on: share of the bill
         "correct_order": 2,
         "fast_bonus": 1,
         "wrong_order": -4,
-        "customer_lost": -1,
+        "customer_lost": -3,  # waited too long and left
+        "sold_out_left": -1,  # found the shelves empty and left (once per student and day)
+        "order_cancelled": -3,  # you cancelled an accepted order
+        "rejected": -1,  # you turned the customer away
         "cleaning_missed": -5,
     },
     # Daily phases: how many students are on campus and how likely they visit a café.
@@ -101,12 +108,12 @@ CONFIG = {
     "products": {
         "coffee": {
             "name": "Coffee (bica)", "icon": "☕", "uses": {"coffee_beans": 1},
-            "station": "coffee_machine", "prep_minutes": 5,
+            "station": "coffee_machine", "prep_minutes": 2,
             "description": "A strong Portuguese espresso.",
         },
         "orange_juice": {
             "name": "Orange juice (0.25 l)", "icon": "🧃", "uses": {"oranges": 3},
-            "station": "juicer", "prep_minutes": 6,
+            "station": "juicer", "prep_minutes": 3,
             "description": "Freshly squeezed, no sugar.",
         },
         "pastel_de_nata": {
@@ -116,7 +123,7 @@ CONFIG = {
         },
         "tea": {
             "name": "Tea", "icon": "🍵", "uses": {"tea_leaves": 1},
-            "station": "kettle", "prep_minutes": 4,
+            "station": "kettle", "prep_minutes": 2,
             "description": "Hot tea of your choice.",
         },
         "croissant": {
@@ -140,15 +147,15 @@ CONFIG = {
     "price_step": 10,
     "max_price": 1_000,
     "upgrades": {
-        "coffee_machine": {"name": "Better coffee machine", "icon": "⚙️", "factor_bonus": 0.15, "cost": 6_000},
-        "seating": {"name": "Seating & decor", "icon": "🪴", "factor_bonus": 0.20, "cost": 12_000},
-        "branding": {"name": "Sign & branding", "icon": "🪧", "factor_bonus": 0.25, "cost": 20_000},
+        "coffee_machine": {"name": "Better coffee machine", "icon": "⚙️", "factor_bonus": 0.15, "cost": 3_000},
+        "seating": {"name": "Seating & decor", "icon": "🪴", "factor_bonus": 0.20, "cost": 6_000},
+        "branding": {"name": "Sign & branding", "icon": "🪧", "factor_bonus": 0.25, "cost": 10_000},
     },
-    "manager_cost": 20_000,
+    "manager_cost": 10_000,
     # After you buy the competitor, its barista keeps selling automatically and
     # orders supplies every morning (and right after the purchase) for this plan.
     "rival_restock_plan": {"coffee": 20, "tea": 15, "croissant": 15},
-    "acquisition_cost": 50_000,
+    "acquisition_cost": 30_000,
     "cleaning_spots": {
         "counter": {"name": "Wipe the counter", "minutes": 3},
         "coffee_machine": {"name": "Clean the coffee machine", "minutes": 3},

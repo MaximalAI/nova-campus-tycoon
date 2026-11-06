@@ -1,9 +1,9 @@
 # AGENTS.md
 
 ## Project
-Nova Campus Tycoon v3, a 3D café management game: Three.js in the browser, rules in Python.
+Nova Campus Tycoon v4, a 3D café management game: Three.js in the browser, rules in Python.
 - Product brief: `docs/product-brief-v2.md` (v1: `docs/product-brief.md`)
-- Current task: the spec named in the prompt, for example `specs/v3-fixes.md`
+- Current task: the spec named in the prompt, for example `specs/v4-improvements.md`
 - Architecture: `docs/architecture.md`
 
 ## Commands

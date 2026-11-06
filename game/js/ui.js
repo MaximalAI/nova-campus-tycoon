@@ -13,6 +13,19 @@ class UI {
     root.querySelectorAll(".speed").forEach((b) =>
       b.addEventListener("click", () => game.setSpeed(Number(b.dataset.speed))));
     this.$("#pause-btn").addEventListener("click", () => game.flow.openPause());
+    this.$("#skip-btn").addEventListener("click", () => game.flow.skipToOpening());
+    this.$("#tray").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.act === "discard") game.flow.discardTray();
+      if (b.dataset.act === "cancel") game.flow.confirmCancelOrder();
+    });
+  }
+  // Only touch the DOM when the content really changed (keeps buttons clickable).
+  setHtml(sel, html) {
+    const e = this.$(sel);
+    if (e._html !== html) { e.innerHTML = html; e._html = html; }
+    return e;
   }
 
   // HUD --------------------------------------------------------------------
@@ -27,7 +40,13 @@ class UI {
     money.classList.toggle("neg", v.money <= 0);
     this.$("#rep-fill").style.width = `${v.reputation}%`;
     this.$("#rep-value").textContent = `${v.reputation} / 100`;
+    this.updateRepPerks(v);
+    this.updateStock(v);
+    this.updateShopPanel(v);
+    const skip = g.flow.canSkipToOpening();
+    this.$("#skip-btn").classList.toggle("hidden", !skip);
     this.$("#objective").textContent = g.flow.objectiveText();
+    this.placeObjective();
     this.root.querySelectorAll(".speed").forEach((b) => b.classList.toggle("active", Number(b.dataset.speed) === g.clock.speed));
     this.$("#pause-btn").classList.toggle("active", g.clock.paused);
     const tray = this.$("#tray");
@@ -35,9 +54,73 @@ class UI {
     if (order) {
       tray.classList.remove("hidden");
       const need = order.items.map((p) => g.config.products[p].icon).join(" ");
-      tray.innerHTML = `<span>Order: ${need}</span><span>→ Tray:</span>` +
-        (v.tray.length ? v.tray.map((p) => `<div class="tray-slot">${g.config.products[p].icon}</div>`).join("") : `<div class="tray-slot"></div>`);
+      this.setHtml("#tray", `<span>Order: ${need}</span><span>→ Tray:</span>` +
+        (v.tray.length ? v.tray.map((p) => `<div class="tray-slot">${g.config.products[p].icon}</div>`).join("") : `<div class="tray-slot"></div>`) +
+        (v.tray.length ? `<button data-act="discard" title="Throw away what is on the tray">🗑 Throw away</button>` : "") +
+        `<button data-act="cancel" class="danger" title="Give up this order">✖ Cancel order</button>`);
     } else tray.classList.add("hidden");
+  }
+
+  // The objective sits centred in the free space between the left cards and the clock card.
+  placeObjective() {
+    const left = this.$("#hud-topleft").getBoundingClientRect().right + 12;
+    const right = window.innerWidth - this.$("#hud-right").getBoundingClientRect().left + 12;
+    const o = this.$("#objective");
+    o.style.left = `${Math.round(left)}px`; o.style.right = `${Math.round(right)}px`;
+  }
+
+  // Reputation: what it brings right now
+  updateRepPerks(v) {
+    const p = v.rep_perks;
+    if (!p) return;
+    const pct = (x) => `${x >= 0 ? "+" : ""}${Math.round(x * 100)}%`;
+    const cls = (x) => (x > 0.001 ? "up" : x < -0.001 ? "down" : "");
+    const tip = p.tip > 0 ? `<span class="up">${Math.round(p.tip * 100)}% tips</span>` : `no tips${p.next_tip ? ` (from ${p.next_tip})` : ""}`;
+    this.setHtml("#rep-perks",
+      `Customers today: <span class="${cls(p.demand_today)}">${pct(p.demand_today)}</span><br>` +
+      `Patience: <span class="${cls(p.patience - 1)}">${pct(p.patience - 1)}</span> · ${tip}`);
+  }
+
+  // Stock: how many portions your shops can still sell
+  updateStock(v) {
+    const cfg = this.game.config;
+    let html = "";
+    const owned = Object.keys(v.shops).filter((s) => v.shops[s].owner === "player");
+    for (const s of owned) {
+      const portions = v.shops[s].portions || {};
+      if (owned.length > 1) html += `<div class="stock-shop">${esc(cfg.shops[s].name)}${v.shops[s].staff ? " (barista)" : ""}</div>`;
+      html += `<div class="stock-row">` + Object.entries(portions).map(([p, n]) => {
+        const c = n === 0 ? "out" : n <= 3 ? "low" : "";
+        return `<span class="${c}" title="${esc(cfg.products[p].name)}: ${n} left">${cfg.products[p].icon} ${n}</span>`;
+      }).join("") + `</div>`;
+    }
+    const bag = Object.entries(v.bag || {});
+    if (bag.length) html += `<div class="stock-shop">In your bag</div><div class="stock-row">` +
+      bag.map(([i, q]) => `<span>${cfg.wholesale_items[i].icon} ${q}</span>`).join("") + `</div>`;
+    this.setHtml("#stock-list", html || "empty");
+  }
+
+  // Wholesaler: shopping list next to what is already in the cart
+  updateShopPanel(v) {
+    const panel = this.$("#shop-panel");
+    const show = v.in_wholesaler || ["WALK_TO_WHOLESALE", "WHOLESALE_SHOPPING"].includes(v.day_state);
+    if (!show) { panel.classList.add("hidden"); return; }
+    panel.classList.remove("hidden");
+    const items = this.game.config.wholesale_items;
+    const keys = [...new Set([...Object.keys(v.shopping_list || {}), ...Object.keys(v.cart || {})])];
+    let html = `<h4>🛒 Shopping list · cart</h4>`;
+    if (!keys.length) html += `<div class="row">Nothing planned yet</div>`;
+    for (const i of keys) {
+      const want = (v.shopping_list || {})[i] || 0, have = (v.cart || {})[i] || 0;
+      const cls = have >= want && want ? "ok" : have < want ? "miss" : "";
+      const mark = have >= want && want ? "✔" : have < want ? `${want - have} missing` : "extra";
+      html += `<div class="row ${cls}"><span>${items[i].icon} ${esc(items[i].name)}</span><span>${have}/${want} · ${mark}</span></div>`;
+    }
+    html += `<div class="row total"><span>Cart total</span><span>${euro(v.cart_total || 0)}</span></div>`;
+    html += `<div class="row"><span>Cash</span><span>${euro(v.money)}</span></div>`;
+    const bag = Object.entries(v.bag || {});
+    if (bag.length) html += `<div class="row ok"><span>Paid, in your bag</span><span>${bag.map(([i, q]) => `${items[i].icon}${q}`).join(" ")}</span></div>`;
+    this.setHtml("#shop-panel", html);
   }
 
   toggleTab(on) {
@@ -93,6 +176,7 @@ class UI {
     const d = this.current;
     const box = this.$("#dialog");
     box.innerHTML = "";
+    box.className = d.wide ? "wide" : "";
     if (d.custom) { d.custom(box); }
     else {
       box.appendChild(el("div", "dlg-head",
@@ -141,7 +225,7 @@ class UI {
   }
   pressSecondary() {
     const d = this.current;
-    if (!d || d.busy) return;
+    if (!d || (d.busy && !d.cancelWhileBusy)) return;
     if (d.secondary && d.secondary.action) d.secondary.action();
     if (d.noEsc && !d.secondary) return;
     if (this.current === d) this.closeDialog();

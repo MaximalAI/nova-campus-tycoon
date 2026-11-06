@@ -19,13 +19,16 @@
 /* HUD ------------------------------------------------------------------ */
 #hud { position: absolute; inset: 0; pointer-events: none; }
 #hud button { pointer-events: auto; }
-#hud-left { position: absolute; top: 16px; left: 16px; padding: 10px 14px; width: 170px; }
+#hud-topleft { position: absolute; top: 16px; left: 16px; display: flex; gap: 10px; align-items: flex-start; }
+#hud-left { padding: 10px 14px; width: 190px; }
+#hud-stock { padding: 10px 14px; min-width: 150px; }
 .hud-small { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #7a6650; }
 #rep-bar { height: 10px; background: #eadfcc; border-radius: 6px; overflow: hidden; margin: 6px 0 4px; }
 #rep-fill { height: 100%; width: 50%; background: linear-gradient(90deg, #f2c94c, #2f9e5b); transition: width .4s; }
 #objective {
-  position: absolute; top: 16px; left: 50%; transform: translateX(-50%); padding: 10px 22px;
-  font-weight: 800; font-size: 16px; max-width: 46vw; text-align: center;
+  /* left/right are set from JS to the free space between the left cards and the clock card */
+  position: absolute; top: 16px; left: 470px; right: 260px; margin: 0 auto; width: fit-content; padding: 10px 22px;
+  font-weight: 800; font-size: 15px; text-align: center;
 }
 #objective::before { content: "🎯 "; }
 #hud-right { position: absolute; top: 16px; right: 16px; padding: 10px 14px; min-width: 210px; }
@@ -42,7 +45,7 @@
 #money { font-size: 24px; font-weight: 900; color: var(--green-dark); text-align: right; }
 #money.neg { color: var(--red); }
 #tray {
-  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 10px 16px;
+  position: absolute; bottom: 64px; left: 50%; transform: translateX(-50%); padding: 10px 16px;
   display: flex; gap: 10px; align-items: center; font-weight: 800;
 }
 .tray-slot { width: 46px; height: 46px; border-radius: 12px; background: #eadfcc; display: flex; align-items: center; justify-content: center; font-size: 28px; }
@@ -66,7 +69,6 @@
   content: ""; position: absolute; left: 50%; bottom: -7px; width: 10px; height: 10px; background: #fff;
   border-radius: 50%; transform: translateX(-50%);
 }
-.bubble .gone { opacity: .35; text-decoration: line-through; }
 .patience { width: 44px; height: 6px; border-radius: 4px; background: rgba(0,0,0,.25); overflow: hidden; margin: 0 auto 4px; }
 .patience > div { height: 100%; }
 .name-tag { font-size: 11px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px #000; text-align: center; }
@@ -74,7 +76,7 @@
 
 /* Toasts ------------------------------------------------------------------ */
 #toasts {
-  position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column-reverse;
+  position: absolute; bottom: 140px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column-reverse;
   gap: 8px; align-items: center; pointer-events: none;
 }
 .toast {
@@ -149,18 +151,52 @@
 #fade { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity .7s; }
 #fade.on { opacity: 1; }
 
-/* V3: minimap with legend, crosshair, emotes ------------------------------- */
-#minimap { position: absolute; right: 16px; bottom: 16px; padding: 10px; width: 220px; pointer-events: none; }
+/* Minimap, crosshair, emotes ------------------------------------------------ */
+#minimap { position: absolute; right: 16px; bottom: 16px; padding: 8px; width: 216px; pointer-events: none; }
 #minimap canvas { width: 200px; height: 200px; border-radius: 12px; display: block; margin: 0 auto; }
-#legend { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; margin-top: 8px; font-size: 11.5px; font-weight: 800; color: #4a3b2c; }
-#legend span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.lg { display: inline-block; width: 12px; height: 12px; border-radius: 3px; flex: none; }
-.lg.cafe { background: #2e8b57; } .lg.rival { background: #c0392b; } .lg.whole { background: #2c6fbb; }
-.lg.you { background: #ffd166; border: 2px solid #2b2118; width: 8px; height: 8px; transform: rotate(45deg); border-radius: 1px; }
-.lg.stud { background: #3d3d3d; border-radius: 50%; width: 7px; height: 7px; }
-.lg.goal { border: 3px solid #ffd166; border-radius: 50%; width: 8px; height: 8px; }
 #crosshair { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none;
   border: 2px solid rgba(255,255,255,.9); border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,.6); }
 .bubble.emote { font-size: 26px; padding: 2px 8px; }
 .serving { font-size: 10px; font-weight: 900; color: #fff; background: #2f9e5b; border-radius: 6px; padding: 1px 6px; margin: 0 auto 4px; text-align: center; }
 #tray { bottom: 18px; }
+
+/* V4: stock, reputation perks, wholesale panel, skip button, tray actions ---- */
+#stock-list { margin-top: 4px; font-size: 14px; font-weight: 800; }
+.stock-shop { font-size: 10.5px; font-weight: 900; color: #7a6650; text-transform: uppercase; letter-spacing: .6px; margin-top: 4px; }
+.stock-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.stock-row span { white-space: nowrap; }
+.stock-row .low { color: #c77c00; }
+.stock-row .out { color: var(--red); }
+#rep-perks { font-size: 11.5px; font-weight: 700; color: #4a3b2c; margin-top: 4px; line-height: 1.45; }
+#rep-perks .up { color: var(--green-dark); } #rep-perks .down { color: var(--red); }
+#shop-panel { position: absolute; top: 190px; right: 16px; width: 230px; padding: 10px 14px; font-size: 13.5px; }
+#shop-panel h4 { margin: 2px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #7a6650; }
+#shop-panel .row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+#shop-panel .row.ok { color: var(--green-dark); }
+#shop-panel .row.miss { color: #a05a00; }
+#shop-panel .total { border-top: 1px dashed #d8c6a8; margin-top: 6px; padding-top: 6px; font-weight: 900; }
+#skip-btn { display: block; width: 100%; margin-top: 8px; border: none; border-radius: 10px; padding: 7px 0; font-weight: 900; cursor: pointer;
+  background: var(--green); color: #fff; font-size: 13px; }
+#skip-btn:hover { background: var(--green-dark); }
+#tray button { pointer-events: auto; border: none; border-radius: 10px; padding: 6px 10px; font-weight: 800; cursor: pointer; background: #eadfcc; color: var(--ink); }
+#tray button.danger { background: #f6d5d3; color: #a12a26; }
+.bubble .gone .ico { opacity: .45; filter: grayscale(1); }
+.bubble .gone { opacity: 1; text-decoration: none; display: inline-flex; align-items: center; gap: 2px; margin-left: 2px; }
+.bubble .gone i { font-size: 9px; font-style: normal; font-weight: 900; background: var(--red); color: #fff; border-radius: 5px;
+  padding: 1px 4px; white-space: nowrap; line-height: 1.2; }
+.chip.off { text-decoration: none; opacity: .75; background: #f6d5d3; }
+.chip.off b { color: #a12a26; font-size: 11px; margin-left: 4px; }
+#dialog.wide { width: min(760px, 94vw); }
+.dlg-scroll { max-height: 52vh; min-height: min(330px, 52vh); overflow-y: auto; padding-right: 4px; }
+.sum-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.sum-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sum-table th { text-align: right; font-size: 11px; color: #7a6650; text-transform: uppercase; padding: 3px 4px; }
+.sum-table th:first-child, .sum-table td:first-child { text-align: left; }
+.sum-table td { text-align: right; padding: 3px 4px; border-bottom: 1px dashed #e4d6c0; font-weight: 700; }
+.sum-table .pos { color: var(--green-dark); } .sum-table .neg { color: var(--red); }
+.sum-h { font-weight: 900; margin: 12px 0 4px; font-size: 14px; }
+.tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.tabs button { border: none; border-radius: 10px; padding: 6px 12px; font-weight: 800; cursor: pointer; background: #eadfcc; color: var(--ink); }
+.tabs button.active { background: var(--ink); color: #fff; }
+.save-info { text-align: center; font-weight: 800; color: #4a3b2c; margin: 6px 0 2px; }
+.sum-h .sub, .note .sub { font-size: 12px; color: #8a755d; font-weight: 700; }

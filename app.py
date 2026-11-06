@@ -1,4 +1,4 @@
-"""Streamlit entry point for Nova Campus Tycoon v2 (UI only).
+"""Streamlit entry point for Nova Campus Tycoon (UI only).
 
 The page shows only the 3D game. The game itself lives in game/ (Three.js)
 and runs as a Streamlit v2 component. It sends batches of events; this file
@@ -67,6 +67,7 @@ def handle_events() -> None:
     if system:
         kind = system[-1]["type"]
         if kind == "new_game":
+            db.abandon_running(conn)  # a new game replaces the old one (reset)
             ss.game_id = db.save_game(conn, logic.new_game())
         elif kind == "continue_game":
             ss.game_id = db.latest_game_id(conn)
@@ -87,6 +88,15 @@ def handle_events() -> None:
     db.save_game(conn, state, ss.game_id)
 
 
+def _save_info(conn) -> dict | None:
+    """Day, money and last save time of the game that "Continue" would load."""
+    gid = db.latest_game_id(conn)
+    if gid is None:
+        return None
+    day, money, updated = conn.execute("SELECT day, money, updated_at FROM saves WHERE id=?", (gid,)).fetchone()
+    return {"day": day, "money": money, "saved_at": updated}
+
+
 def payload() -> dict:
     conn = _conn()
     state = db.load_game(conn, ss.game_id) if ss.game_id is not None else None
@@ -100,6 +110,7 @@ def payload() -> dict:
         "session": ss.session,
         "screen": "game" if state else "title",
         "has_save": db.latest_game_id(conn) is not None,
+        "save_info": _save_info(conn),
         "view": logic.view(state) if state else None,
         "plan": logic.day_plan(state) if state else None,
         "config": CONFIG,

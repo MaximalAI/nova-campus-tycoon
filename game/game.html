@@ -2,10 +2,17 @@
   <div id="viewport"></div>
   <div id="overlay-labels"></div>
   <div id="hud" class="hidden">
-    <div id="hud-left" class="glass">
-      <div class="hud-small">Reputation</div>
-      <div id="rep-bar"><div id="rep-fill"></div></div>
-      <div id="rep-value" class="hud-small"></div>
+    <div id="hud-topleft">
+      <div id="hud-stock" class="glass">
+        <div class="hud-small">Stock</div>
+        <div id="stock-list"></div>
+      </div>
+      <div id="hud-left" class="glass">
+        <div class="hud-small">Reputation</div>
+        <div id="rep-bar"><div id="rep-fill"></div></div>
+        <div id="rep-value" class="hud-small"></div>
+        <div id="rep-perks"></div>
+      </div>
     </div>
     <div id="objective" class="glass"></div>
     <div id="hud-right" class="glass">
@@ -21,17 +28,13 @@
         <button id="pause-btn" title="Pause (P)">❚❚</button>
       </div>
       <div id="money">€50.00</div>
+      <button id="skip-btn" class="hidden" title="Jump to 08:00 and open the café">⏩ Start the day (08:00)</button>
     </div>
+    <div id="shop-panel" class="glass hidden"></div>
     <div id="tray" class="glass hidden"></div>
-    <div id="help" class="glass">WASD walk · Shift run · Mouse look (click the game) · E use · Tab list · P pause</div>
+    <div id="help" class="glass"><b>Click the game</b> for mouse look · <b>WASD</b> walk · <b>Shift</b> run · <b>E</b> use · <b>Tab</b> list · <b>P</b> pause</div>
     <div id="crosshair" class="hidden"></div>
-    <div id="minimap" class="glass"><canvas id="minimap-canvas" width="200" height="200"></canvas>
-      <div id="legend">
-        <span><i class="lg cafe"></i>Your café</span><span><i class="lg rival"></i>Competitor</span>
-        <span><i class="lg whole"></i>Wholesaler</span><span><i class="lg you"></i>You</span>
-        <span><i class="lg stud"></i>Students</span><span><i class="lg goal"></i>Next goal</span>
-      </div>
-    </div>
+    <div id="minimap" class="glass"><canvas id="minimap-canvas" width="200" height="200"></canvas></div>
   </div>
   <div id="tab-panel" class="glass hidden"></div>
   <div id="toasts"></div>

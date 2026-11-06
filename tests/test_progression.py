@@ -4,6 +4,7 @@ import pytest
 
 import logic
 import students as st
+from config import CONFIG
 from logic import GameError
 
 
@@ -40,7 +41,7 @@ def test_manager_and_acquisition(rich):
     state, res = go(state, type="buy_competitor")
     assert state["shops"]["rival"]["owner"] == "player"
     restock = res["restock"]["cost"]  # V3: the barista restocks right after the purchase
-    assert state["money"] == 200_000 - 20_000 - 50_000 - restock
+    assert state["money"] == 200_000 - CONFIG["manager_cost"] - CONFIG["acquisition_cost"] - restock
     assert state["status"] == logic.RUNNING
     state, _ = go(state, type="enter_wholesaler")
     state, _ = go(state, type="set_cart_item", item="tea_leaves", qty=1)
@@ -113,7 +114,7 @@ def test_purchase_restocks_the_competitor_immediately(rich):
     # 20 coffee + 15 tea + 15 croissants -> 1 pack beans, 1 box tea, 15 croissants
     assert stock == {"coffee_beans": 25, "tea_leaves": 20, "croissant_dough": 15}
     assert res["restock"]["cost"] == 400 + 240 + 15 * 50
-    assert state["money"] == 200_000 - 20_000 - 50_000 - 1_390
+    assert state["money"] == 200_000 - CONFIG["manager_cost"] - CONFIG["acquisition_cost"] - 1_390
 
 
 def test_customers_of_the_bought_competitor_get_their_order_and_pay(rich):
@@ -144,7 +145,7 @@ def test_competitor_restocks_every_morning(rich):
 
 def test_restock_only_buys_what_the_money_allows(rich):
     state, _ = go(rich, type="hire_manager", shop="cafe")
-    state["money"] = 50_000 + 500  # after the purchase only €5.00 are left
+    state["money"] = CONFIG["acquisition_cost"] + 500  # after the purchase only €5.00 are left
     state, res = go(state, type="buy_competitor")
     assert res["restock"]["cost"] <= 500
     assert state["money"] >= 0

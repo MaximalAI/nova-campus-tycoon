@@ -98,6 +98,7 @@ class Game {
     if (!data) return;
     if (!this.renderer) { this.lighting = data.lighting; this.init(data.config); }
     this.lighting = data.lighting;
+    this.titleInfo = { hasSave: data.has_save, info: data.save_info };
     const prevView = this.view;
     if (data.view) this.view = data.view;
     const sessionChanged = data.session !== this.session;
@@ -109,7 +110,7 @@ class Game {
         this.flow.resetDay({ schedule: {} }, { time: 5, students: {}, open: false, closed: false, in_wholesaler: false });
         this.ui.showHud(false);
         this.ui.queue = []; if (this.ui.current) this.ui.closeDialog();
-        this.flow.showTitle(data.has_save);
+        this.flow.showTitle(data.has_save, data.save_info);
       }
     }
     this.bridge.receive(data);
@@ -132,7 +133,7 @@ class Game {
     this.player.teleport(P.spawn, Math.PI / 2);
     this.camYaw = -Math.PI / 2;
     this.root.querySelector("#fade").classList.remove("on");
-    if (continuing) this.bridge.send("resume", {}, () => {});
+    if (continuing) { this.flow.wholesaleAllowed = false; this.bridge.send("resume", {}, () => {}); }
     if (view.status !== "running") return this.flow.openEnd();
     if (view.day_state === "DAY_SUMMARY") return this.flow.openSummary();
     if (view.day_state === "MORNING_PLANNING" && view.time < 5.01) this.flow.openMorning();
@@ -150,7 +151,11 @@ class Game {
       if (e.code === "Space" && this.view) e.preventDefault();
       if (e.repeat) return;
       if (e.code === "Enter") { e.preventDefault(); this.ui.pressPrimary(); }
-      if (e.code === "Escape") { e.preventDefault(); if (this.ui.current && !this.ui.current.noEsc) this.ui.pressSecondary(); }
+      if (e.code === "Escape") {
+        e.preventDefault();
+        if (this.pointerLocked) { this.releasePointer(); return; }
+        if (this.ui.current && !this.ui.current.noEsc) this.ui.pressSecondary();
+      }
       if (e.code === "KeyE" && !this.ui.dialogOpen) this.interact();
       if (e.code === "KeyP") this.flow.openPause();
     });
@@ -163,6 +168,13 @@ class Game {
     const canvas = this.renderer.domElement;
     let drag = null;
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    // The game lives in a shadow DOM (Streamlit component). There, document.pointerLockElement
+    // points to the shadow host and not to the canvas, so we ask the canvas' own root.
+    const lockedOnCanvas = () => {
+      const root = canvas.getRootNode();
+      return (root && root.pointerLockElement === canvas) || document.pointerLockElement === canvas;
+    };
+    this.lockFailed = false;
     canvas.addEventListener("pointerdown", (e) => {
       this.focus();
       if (!this.view || this.ui.dialogOpen) return;
@@ -170,14 +182,33 @@ class Game {
       if (e.button !== 0) return;
       if (this.pointerLocked) return this.clickAt(window.innerWidth / 2, window.innerHeight / 2); // crosshair
       if (!this.clickAt(e.clientX, e.clientY)) {
-        // Clicking empty space captures the mouse for looking around (Esc releases it)
-        try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) { /* not supported */ }
+        // Clicking empty space captures the mouse for looking around (Esc releases it).
+        // Until the capture is active (or if the browser refuses it) dragging also turns the camera.
+        drag = { x: e.clientX, y: e.clientY, yaw: this.camYaw, pitch: this.camPitch };
+        this.captureMouse();
       }
     });
-    document.addEventListener("pointerlockchange", () => {
-      this.pointerLocked = document.pointerLockElement === canvas;
+    this.captureMouse = () => {
+      try {
+        const p = canvas.requestPointerLock();
+        if (p && p.catch) p.catch(() => this.onLockError());
+      } catch (err) { this.onLockError(); }
+    };
+    this.onLockError = () => {
+      if (this.lockFailed) return;
+      this.lockFailed = true;
+      this.ui.toast("Mouse capture is blocked here - hold the mouse button and drag to look around.");
+    };
+    const onLockChange = () => {
+      this.pointerLocked = lockedOnCanvas();
+      if (this.pointerLocked) { drag = null; this.lockFailed = false; }
       this.root.querySelector("#crosshair").classList.toggle("hidden", !this.pointerLocked);
-    });
+      this.root.querySelector("#help").innerHTML = this.pointerLocked
+        ? "<b>Mouse</b> look · <b>WASD</b> walk · <b>Shift</b> run · <b>Click / E</b> use · <b>Esc</b> free the mouse"
+        : "<b>Click the game</b> for mouse look · <b>WASD</b> walk · <b>Shift</b> run · <b>E</b> use · <b>Tab</b> list · <b>P</b> pause";
+    };
+    document.addEventListener("pointerlockchange", onLockChange);
+    document.addEventListener("pointerlockerror", () => this.onLockError());
     window.addEventListener("mousemove", (e) => {
       if (this.pointerLocked) {
         this.camYaw -= e.movementX * 0.0028;
@@ -327,7 +358,9 @@ class Game {
         const bar = pr.bar(); if (bar) bar.style.width = `${clamp(pr.done / pr.minutes, 0, 1) * 100}%`;
         if (pr.done >= pr.minutes) { this.flow.progress = null; pr.onDone(); }
       }
-      this.player.update(dt, this.input, this.camYaw, this.ui.dialogOpen);
+      // With the mouse captured the figure always faces where you look (Minecraft style);
+      // otherwise it turns towards the walking direction (GTA style).
+      this.player.update(dt, this.input, this.camYaw, this.ui.dialogOpen, this.pointerLocked);
       this.flow.updateGate();
       this.flow.updateZones();
       this.flow.updateStudents(dt, dtGameMin);
@@ -350,6 +383,7 @@ class Game {
       const on = hide.has(key);
       for (const m of parts.wallMats) { m.opacity = on ? 0.16 : 1; m.depthWrite = !on; }
       parts.roof.visible = !on;
+      if (parts.sign) parts.sign.visible = !on;
     }
   }
 
@@ -362,6 +396,7 @@ class Game {
       this.highlighted = it;
     }
     this.currentHint = it && !this.ui.dialogOpen ? it : null;
+    w.updateShelves(v);
     // Roof colour shows the owner: green = yours, red = competitor
     w.buildingParts.rival.roof.material.color.setHex(v.shops.rival.owner === "player" ? 0x2e8b57 : BUILDINGS.rival.roof);
     // Staff behind the counters
@@ -403,7 +438,7 @@ class Game {
         const items = a.order || a.wanted || [];
         if (!items.length && !(a.soldOut || []).length) continue;
         const icons = items.map((p) => this.config.products[p].icon).join("") +
-          (a.soldOut || []).map((p) => `<span class="gone">${this.config.products[p].icon}</span>`).join("");
+          (a.soldOut || []).map((p) => `<span class="gone" title="sold out"><span class="ico">${this.config.products[p].icon}</span><i>sold out</i></span>`).join("");
         let pat = "";
         if (a.mode === "queue" && this.view.open) {
           const f = clamp(a.patience / a.patienceMax, 0, 1);

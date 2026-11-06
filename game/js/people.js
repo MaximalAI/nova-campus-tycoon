@@ -109,7 +109,7 @@ class Player {
   }
   // GTA/Minecraft style: WASD relative to the camera, the figure turns smoothly
   // towards where it walks, with acceleration and braking.
-  update(dt, input, camYaw, locked) {
+  update(dt, input, camYaw, locked, faceCamera = false) {
     let mx = 0, mz = 0;
     if (!locked) {
       if (input.up) mz -= 1;
@@ -138,8 +138,10 @@ class Player {
     }
     this.pos.x = clamp(this.pos.x, -64, 64); this.pos.z = clamp(this.pos.z, -64, 64);
     const stride = dist2(before, this.pos);
-    if (Math.hypot(this.vel.x, this.vel.z) > 0.3) {
-      const target = Math.atan2(this.vel.x, this.vel.z);
+    const moving = Math.hypot(this.vel.x, this.vel.z) > 0.3;
+    if (moving || faceCamera) {
+      // camera looks along -offset, so "forward" is camYaw + PI
+      const target = faceCamera ? camYaw + Math.PI : Math.atan2(this.vel.x, this.vel.z);
       let d = target - this.facing;
       while (d > Math.PI) d -= Math.PI * 2;
       while (d < -Math.PI) d += Math.PI * 2;

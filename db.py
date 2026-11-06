@@ -1,4 +1,4 @@
-"""SQLite storage for Nova Campus Tycoon v2.
+"""SQLite storage for Nova Campus Tycoon.
 
 One row per saved game. Key values are columns (easy to query), the full
 game state is stored as JSON. No game rules here.
@@ -53,6 +53,12 @@ def save_game(conn: sqlite3.Connection, state: dict, game_id: int | None = None)
 def load_game(conn: sqlite3.Connection, game_id: int) -> dict | None:
     row = conn.execute("SELECT state_json FROM saves WHERE id=?", (game_id,)).fetchone()
     return json.loads(row[0]) if row else None
+
+
+def abandon_running(conn: sqlite3.Connection) -> None:
+    """Starting over: running games are no longer offered for "Continue"."""
+    with conn:
+        conn.execute("UPDATE saves SET status='abandoned', updated_at=CURRENT_TIMESTAMP WHERE status='running'")
 
 
 def latest_game_id(conn: sqlite3.Connection) -> int | None:

@@ -22,7 +22,7 @@ Decisions that the brief left open or that came up during implementation. Change
 - At 20:00 the speed switches back to 1x, otherwise there is no time to clean at 8x.
 - Cleaning that is still running after 21:00 completes; the clock stays at 21:00.
 - The player's own walking speed is not multiplied by the game speed (brief 5).
-- Camera (v3): one third-person follow camera everywhere, GTA style. Click the game to capture the mouse (pointer lock), the mouse turns the camera, W walks in the camera direction, Shift runs, the wheel zooms. Inside buildings the camera moves closer and higher, and walls or roofs between camera and player fade out, so the player is never hidden behind the counter. The v2 fixed counter camera was removed because it sat behind the stations.
+- Camera (v3/v4): one third-person follow camera everywhere, GTA style. Click the game to capture the mouse (pointer lock), the mouse turns the camera, W walks in the camera direction, Shift runs, the wheel zooms. Inside buildings the camera moves closer and higher, and walls or roofs between camera and player fade out, so the player is never hidden behind the counter. The v2 fixed counter camera was removed because it sat behind the stations.
 - Movement (v3): acceleration and smooth turning; movement is split into small sub-steps so fast running cannot pass through walls.
 
 ## Saving
@@ -43,3 +43,21 @@ Decisions that the brief left open or that came up during implementation. Change
 - Automatic serving (bot, barista or manager) freezes the customer's patience while the order is made, so nobody leaves during service.
 - Minimap with legend: your café (green), competitor (red, green once owned), wholesaler (blue), you (arrow with view cone), students (dots), next goal (ring).
 - Old v2 saves are migrated on load (`logic.migrate`): missing `staff`, `cart_prefilled` and `restock` keys get defaults.
+
+## v4 changes
+- Mouse look: the game runs inside a shadow DOM (Streamlit component). There `document.pointerLockElement` is the shadow host, not the canvas, so v3 never noticed that the mouse was captured. v4 asks the canvas' own root. With the mouse captured the figure always faces the view direction (Minecraft style); without it, it turns towards the walking direction (GTA style). If the browser refuses the capture, dragging with the mouse turns the camera.
+- Stock card left of the reputation: portions each owned shop can still sell, updated live (red = 0, orange = 3 or less).
+- Minimap without legend; the building icons on the map are enough.
+- Wholesaler card: shopping list next to the cart (missing / done), cart total, cash.
+- "Start the day" button: after shopping and stocking, before 08:00, jumps the clock to 08:00 and opens the café.
+- Preparation is faster: coffee 2, juice 3, tea 2 game minutes.
+- Mistakes while serving: Cancel stops a product that is being made (nothing is used). A wrong product on the tray can be thrown away (ingredients lost). An order can be cancelled (customer leaves, reputation -3).
+- Sold out: crossed-out emojis were unclear. Bubbles and the order dialog now say "sold out".
+- What reputation brings: more customers (factor 0.7 to 1.3 for the day), more patience (x0.75 to x1.35), tips for correct orders (5 % from 60, 10 % from 75, 15 % from 90). The reputation card shows the current effect.
+- Reputation goes down visibly: waited too long -3, sold out and left -1 (once per student and day, otherwise one empty shelf would ruin the day), turned away -1, cancelled order -3, wrong order -4. Every change shows a toast.
+- Cheaper: upgrades €30 / €60 / €100, manager €100, competitor €300.
+- Daily summary with four tabs: today (incl. tips, sold out, thrown away), stock movements per item (start, in, used, spoiled, end, change), the competitor (customers, sales, market share, prices of the day), the last 7 days.
+- Saving: the start screen offers "Continue" first (Enter) and shows day and cash of the save. A new game asks first and replaces the save (`db.abandon_running`). Continuing inside the wholesaler puts unpaid goods back.
+- Pause menu: "New game" (with confirmation) to start over.
+- Storage shelf: was a solid block with boxes stuck inside it. Now an open shelf whose crates show the real stock.
+- Clock edge case: the browser clock is a float, so 20.9999999 now counts as 21:00 (before, the day could get stuck in "closing").
