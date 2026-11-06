@@ -13,7 +13,8 @@ Nova Campus Tycoon, a day-based café management game in Streamlit.
 ## Structure
 - `app.py`: Streamlit screens (UI only). Calls `logic.py` and `db.py`, contains no game rules.
 - `logic.py`: game rules (no UI, no database code), including the `CONFIG` dict.
-- `db.py`: SQLite storage. The database file is `data/game.db`.
+- `db.py`: SQLite storage. The database file is `data/game.db` (override with the env var `NCT_DB_PATH`).
+- `campus3d.py`: 3D campus view (Three.js HTML for `st.iframe`). Visual only: reads the game state, never changes it.
 - `tests/`: pytest tests. Tests use a temporary database (`tmp_path`), never `data/game.db`.
 - `docs/product-brief.md`: Campus Tycoon BRD (source of truth).
 - `specs/`: task specs (Why / What / Out of scope / Done when).
