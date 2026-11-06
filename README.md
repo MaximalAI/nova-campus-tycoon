@@ -1,26 +1,39 @@
 # Nova Campus Tycoon
 
-A day-based café management game on a university campus: buy ingredients, set prices, serve students, upgrade your shop and buy out the competitor until you hold the monopoly.
+A 3D café management game on a university campus. Plan your day, shop at the wholesaler, set prices, serve students at the counter, upgrade your café, hire a manager and buy out the competitor until you own every café on campus.
 
 ## Run
 ```bash
 uv sync
 uv run streamlit run app.py
 ```
-The 3D campus view loads Three.js from a CDN, so it needs an internet connection. The game itself works without it.
+The game opens in the browser (full window). It needs an internet connection because Three.js is loaded from a CDN.
 
 ## Test
 ```bash
 uv run pytest
 ```
 
-## How to play
-1. **Morning:** buy ingredients at the wholesaler (they spoil at the end of the day), set your prices, buy upgrades or hire staff. Then click **Open shop**.
-2. **Selling day:** students queue at your café. Click **Accept next order** to prepare it; every product costs preparation time from your 720 s day budget. Click **End day** when you are done.
-3. **End of day:** check revenue, costs, spoilage and market share, then start the next day.
-4. Hire an employee (€200) so orders are served automatically, then buy the competitor (€500). You win when you own both shops and both have an employee. If your balance is €0.00 or below at the end of a day, the game is over.
+## Controls
+| Action | Key |
+|---|---|
+| Walk | Arrow keys or WASD |
+| Use / talk | E or left click |
+| Confirm / cancel pop-up | Enter / Esc |
+| Shopping list and stock | Tab (hold) |
+| Pause | P or the pause button |
+| Rotate / zoom camera | Right mouse drag / mouse wheel |
+| Game speed | 1x 2x 4x 8x buttons |
+
+## How a day works
+1. 05:00 planning board: decide what to sell, the shopping list is created.
+2. Walk to the wholesaler, fill the cart, pay at the checkout.
+3. Back in the café: stock the goods, set prices at the counter, open (automatically at 08:00).
+4. 08:00-20:00: accept orders, prepare them at the stations, hand them over. Money comes at handover.
+5. 20:00: clean the four spots, read the daily summary, next day.
 
 ## Documents
-- Product brief (source of truth): `docs/product-brief.md`
-- Task specs: `specs/`
+- Product brief v2 (source of truth): `docs/product-brief-v2.md`
+- Task spec: `specs/v2-campus-game.md`
+- Architecture: `docs/architecture.md`, assumptions: `docs/assumptions.md`
 - Rules for coding agents: `AGENTS.md` (Claude Code reads `CLAUDE.md`, which imports it)

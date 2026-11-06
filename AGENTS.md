@@ -1,9 +1,10 @@
 # AGENTS.md
 
 ## Project
-Nova Campus Tycoon, a day-based café management game in Streamlit.
-- Product brief: `docs/product-brief.md`
-- Current task: `specs/first-feature.md`
+Nova Campus Tycoon v2, a 3D café management game: Three.js in the browser, rules in Python.
+- Product brief: `docs/product-brief-v2.md` (v1: `docs/product-brief.md`)
+- Current task: the spec named in the prompt, for example `specs/v2-campus-game.md`
+- Architecture: `docs/architecture.md`
 
 ## Commands
 - Install dependencies: `uv sync`
@@ -11,16 +12,20 @@ Nova Campus Tycoon, a day-based café management game in Streamlit.
 - Run the tests: `uv run pytest`
 
 ## Structure
-- `app.py`: Streamlit screens (UI only). Calls `logic.py` and `db.py`, contains no game rules.
-- `logic.py`: game rules (no UI, no database code), including the `CONFIG` dict.
+- `app.py`: Streamlit page (UI only). Mounts the game, passes event batches to `bridge.py`, saves with `db.py`.
+- `bridge.py`: runs a batch of browser events through `logic.apply`.
+- `logic.py`: game state and all rules (no UI, no database code).
+- `students.py`, `timeclock.py`: student behaviour and decisions, clock, phases, lighting (pure rules).
+- `config.py`: all balancing values in one place.
 - `db.py`: SQLite storage. The database file is `data/game.db` (override with the env var `NCT_DB_PATH`).
-- `campus3d.py`: 3D campus view (Three.js HTML for `st.iframe`). Visual only: reads the game state, never changes it.
+- `simulation.py`: headless day driver for tests and balancing.
+- `game/`: browser code (rendering, input, animation, HUD, pop-ups). It never decides game rules.
 - `tests/`: pytest tests. Tests use a temporary database (`tmp_path`), never `data/game.db`.
-- `docs/product-brief.md`: Campus Tycoon BRD (source of truth).
+- `docs/product-brief-v2.md`: Campus Tycoon BRD (source of truth).
 - `specs/`: task specs (Why / What / Out of scope / Done when).
 
 ## Code rules
-- Money is integer cents.
+- Money is integer cents. Game time is hours as a float (8.5 = 08:30).
 - Invalid actions raise a clear error in `logic.py` and change nothing in the saved state.
 - Never commit `data/`, `*.db`, `.env` or other secrets.
 

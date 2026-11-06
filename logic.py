@@ -1,579 +1,904 @@
-"""Game rules for Nova Campus Tycoon.
+"""Game rules for Nova Campus Tycoon v2.
 
-Pure functions only: no Streamlit and no database code in this module.
-All balancing values live in CONFIG. Money is handled as integer cents.
+No UI and no database code. The game state is a JSON-compatible dict.
+`apply(state, event)` checks the rules for one event from the browser and
+returns (new_state, result). The input state is never modified, so a
+rejected event (GameError) changes nothing.
 
-Every action function takes a Game, checks all rules first and returns a NEW
-Game. The input is never modified, so a rejected action (GameError) leaves the
-state exactly as it was.
-
-See docs/product-brief.md for the rules.
+See docs/product-brief-v2.md for the rules.
 """
 
 from __future__ import annotations
 
 import copy
-import itertools
+import math
 import random
-from dataclasses import dataclass, field
 
-# ---------------------------------------------------------------------------
-# Balancing values (all money in cents, all times in seconds)
-# ---------------------------------------------------------------------------
+import students as st
+import timeclock
+from config import CONFIG
 
-CONFIG = {
-    "start_balance": 10_000,
-    "student_count": 10,
-    "student_budget": 1_000,
-    "utility_min": 50,
-    "utility_max": 400,
-    "day_time_budget": 720,
-    "max_price": 1_000,
-    "employee_cost": 20_000,
-    "acquisition_cost": 50_000,
-    "ingredients": {
-        "coffee_beans": {"name": "Coffee beans", "cost": 40},
-        "oranges": {"name": "Oranges", "cost": 60},
-        "frozen_pastel": {"name": "Frozen Pastel de Nata", "cost": 50},
-        "tea_leaves": {"name": "Tea leaves", "cost": 30},
-        "frozen_croissants": {"name": "Frozen croissants", "cost": 70},
-    },
-    "products": {
-        "coffee": {"name": "Coffee", "ingredient": "coffee_beans", "prep_time": 15},
-        "orange_juice": {"name": "Orange Juice", "ingredient": "oranges", "prep_time": 25},
-        "pastel_de_nata": {"name": "Pastel de Nata", "ingredient": "frozen_pastel", "prep_time": 20},
-        "tea": {"name": "Tea", "ingredient": "tea_leaves", "prep_time": 10},
-        "croissant": {"name": "Croissant", "ingredient": "frozen_croissants", "prep_time": 20},
-    },
-    "shops": {
-        "player_cafe": {
-            "name": "Player café",
-            "products": ["coffee", "orange_juice", "pastel_de_nata"],
-            "base_factor": 1.0,
-            "start_owner": "player",
-            "start_prices": {"coffee": 200, "orange_juice": 250, "pastel_de_nata": 180},
-        },
-        "competitor": {
-            "name": "Competitor café",
-            "products": ["coffee", "tea", "croissant"],
-            "base_factor": 1.2,
-            "start_owner": "bot",
-            "start_prices": {"coffee": 200, "tea": 180, "croissant": 220},
-        },
-    },
-    "upgrades": {
-        "coffee_machine": {"name": "Better coffee machine", "factor_bonus": 0.15, "cost": 6_000},
-        "seating": {"name": "Seating & decoration", "factor_bonus": 0.20, "cost": 12_000},
-        "branding": {"name": "Branding & signage", "factor_bonus": 0.25, "cost": 20_000},
-    },
-}
+T = CONFIG["time"]
+ITEMS = CONFIG["wholesale_items"]
+PRODUCTS = CONFIG["products"]
+SHOPS = CONFIG["shops"]
 
-SHOP_IDS = list(CONFIG["shops"])  # ["player_cafe", "competitor"]
+# Day states, used for the guidance ("next objective")
+MORNING_PLANNING = "MORNING_PLANNING"
+WALK_TO_WHOLESALE = "WALK_TO_WHOLESALE"
+WHOLESALE_SHOPPING = "WHOLESALE_SHOPPING"
+WALK_TO_CAFE = "WALK_TO_CAFE"
+SET_PRICES = "SET_PRICES"
+SHOP_OPEN = "SHOP_OPEN"
+CLOSING = "CLOSING"
+DAY_SUMMARY = "DAY_SUMMARY"
 
-# Game phases and statuses
-MORNING, SELLING, SUMMARY, FINISHED = "morning", "selling", "summary", "finished"
 RUNNING, GAME_OVER, VICTORY = "running", "game_over", "victory"
 
 
 class GameError(Exception):
-    """Raised when the player tries an action the rules do not allow."""
+    """Raised when an action is not allowed by the rules."""
 
 
-# ---------------------------------------------------------------------------
-# State
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class Order:
-    """What one student wants to buy at one shop."""
-
-    student: int
-    items: list[str]
-
-
-@dataclass
-class Shop:
-    shop_id: str
-    owner: str  # "player" or "bot"
-    prices: dict[str, int]
-    upgrades: list[str] = field(default_factory=list)
-    has_employee: bool = False
-    inventory: dict[str, int] = field(default_factory=dict)
-
-
-@dataclass
-class ShopDayStats:
-    """Numbers for one shop on the current day."""
-
-    time_left: int = 0
-    sold: dict[str, int] = field(default_factory=dict)
-    revenue: int = 0
-    ingredient_cost: int = 0
-    spending: int = 0  # upgrades, hiring, acquisition
-    spoiled_value: int = 0
-    served: int = 0
-    lost: int = 0
-
-
-@dataclass
-class Game:
-    day: int
-    balance_cents: int
-    phase: str
-    status: str
-    seed: int
-    shops: dict[str, Shop]
-    manual_shop: str | None = "player_cafe"
-    queues: dict[str, list[Order]] = field(default_factory=dict)
-    stats: dict[str, ShopDayStats] = field(default_factory=dict)
-    history: list[dict] = field(default_factory=list)
-    total_profit: int = 0
-    game_id: int | None = None
-
-
-# ---------------------------------------------------------------------------
-# Small helpers
-# ---------------------------------------------------------------------------
-
-
-def format_money(cents: int) -> str:
+def euro(cents: int) -> str:
+    """German money format used in the game: 1234 -> '12,34 €'."""
     sign = "-" if cents < 0 else ""
-    cents = abs(cents)
-    return f"{sign}€{cents // 100}.{cents % 100:02d}"
-
-
-def shop_ingredients(shop_id: str) -> list[str]:
-    """Ingredients needed for the products of a shop."""
-    products = CONFIG["shops"][shop_id]["products"]
-    return [CONFIG["products"][p]["ingredient"] for p in products]
-
-
-def shop_factor(shop: Shop) -> float:
-    base = CONFIG["shops"][shop.shop_id]["base_factor"]
-    bonus = sum(CONFIG["upgrades"][u]["factor_bonus"] for u in shop.upgrades)
-    return round(base + bonus, 4)
-
-
-def player_shops(game: Game) -> list[str]:
-    return [s for s in SHOP_IDS if game.shops[s].owner == "player"]
-
-
-def _empty_stats() -> dict[str, ShopDayStats]:
-    return {s: ShopDayStats() for s in SHOP_IDS}
-
-
-def _require_running(game: Game) -> None:
-    if game.status != RUNNING or game.phase == FINISHED:
-        raise GameError("The game is over. Start a new game.")
-
-
-def _require_phase(game: Game, phase: str) -> None:
-    _require_running(game)
-    if game.phase != phase:
-        raise GameError(f"This action is only possible in the {phase} phase.")
-
-
-def _require_player_shop(game: Game, shop_id: str) -> Shop:
-    if shop_id not in game.shops:
-        raise GameError(f"Unknown shop: {shop_id}.")
-    shop = game.shops[shop_id]
-    if shop.owner != "player":
-        raise GameError("You do not own this shop.")
-    return shop
-
-
-def _pay(game: Game, amount: int) -> None:
-    if amount > game.balance_cents:
-        raise GameError(
-            f"Not enough money: this costs {format_money(amount)}, "
-            f"your balance is {format_money(game.balance_cents)}."
-        )
-    game.balance_cents -= amount
-
-
-def _check_victory(game: Game) -> None:
-    owned = all(s.owner == "player" for s in game.shops.values())
-    staffed = all(s.has_employee for s in game.shops.values())
-    if owned and staffed:
-        game.status = VICTORY
-        game.phase = FINISHED
+    cents = abs(int(round(cents)))
+    return f"{sign}{cents // 100},{cents % 100:02d} €"
 
 
 # ---------------------------------------------------------------------------
-# New game
+# New game and new day
 # ---------------------------------------------------------------------------
 
 
-def new_game(seed: int | None = None) -> Game:
+def _empty_stats() -> dict:
+    return {
+        "shops": {s: {"revenue": 0, "sold": {}, "served": 0, "lost": 0, "wrong": 0} for s in SHOPS},
+        "purchase_cost": 0,
+        "spending": 0,
+        "rival_revenue": 0,
+    }
+
+
+def new_game(seed: int | None = None) -> dict:
     if seed is None:
         seed = random.randrange(1, 1_000_000_000)
-    shops = {}
-    for shop_id, spec in CONFIG["shops"].items():
-        shops[shop_id] = Shop(
-            shop_id=shop_id,
-            owner=spec["start_owner"],
-            prices=dict(spec["start_prices"]),
-            inventory={i: 0 for i in shop_ingredients(shop_id)},
-        )
-    return Game(
-        day=1,
-        balance_cents=CONFIG["start_balance"],
-        phase=MORNING,
-        status=RUNNING,
-        seed=seed,
-        shops=shops,
-        manual_shop="player_cafe",
-        queues={s: [] for s in SHOP_IDS},
-        stats=_empty_stats(),
+    shops = {
+        s: {
+            "owner": spec["start_owner"],
+            "prices": dict(spec["start_prices"]),
+            "upgrades": [],
+            "manager": False,
+            "stock": [],
+        }
+        for s, spec in SHOPS.items()
+    }
+    state = {
+        "seed": seed,
+        "day": 0,
+        "status": RUNNING,
+        "money": CONFIG["start_money"],
+        "reputation": CONFIG["reputation"]["start"],
+        "shops": shops,
+        "plan": dict(CONFIG["start_plan"]),
+        "history": [],
+        "total_profit": 0,
+    }
+    return _start_day(state, 1)
+
+
+def reputation_factor(reputation: float) -> float:
+    lo, hi = CONFIG["reputation"]["factor_range"]
+    return round(lo + (hi - lo) * max(0, min(100, reputation)) / 100, 4)
+
+
+def _start_day(state: dict, day: int) -> dict:
+    state.update({
+        "day": day,
+        "time": T["day_start"],
+        "day_state": MORNING_PLANNING,
+        "rep_factor": reputation_factor(state["reputation"]),
+        "shopping_list": {},
+        "cart_prefilled": False,
+        "cart": {},
+        "bag": {},
+        "in_wholesaler": False,
+        "open": False,
+        "closed": False,
+        "last_call": False,
+        "current_order": None,
+        "tray": [],
+        "cleaning": {spot: False for spot in CONFIG["cleaning_spots"]},
+        "stats": _empty_stats(),
+        "summary": None,
+        "students": st.make_pool(state["seed"], day),
+        "schedule": st.make_schedule(state["seed"], day),
+    })
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def owned_shops(state: dict) -> list[str]:
+    return [s for s in SHOPS if state["shops"][s]["owner"] == "player"]
+
+
+def is_auto(state: dict, shop: str) -> bool:
+    """Bot-owned shops and shops with a manager serve automatically."""
+    data = state["shops"][shop]
+    return data["owner"] == "bot" or data["manager"]
+
+
+def shop_factor(state: dict, shop: str) -> float:
+    data = state["shops"][shop]
+    factor = SHOPS[shop]["base_factor"] + sum(
+        CONFIG["upgrades"][u]["factor_bonus"] for u in data["upgrades"]
     )
+    if data["owner"] == "player":
+        factor *= state["rep_factor"]
+    return round(factor, 4)
+
+
+def offer_prices(state: dict) -> dict[str, int]:
+    return {
+        st.offering_key(s, p): state["shops"][s]["prices"][p]
+        for s in SHOPS for p in SHOPS[s]["products"]
+    }
+
+
+def item_available(state: dict, item: str) -> bool:
+    return not ITEMS[item]["needs_rival"] or state["shops"]["rival"]["owner"] == "player"
+
+
+def stock_units(state: dict, shop: str, item: str) -> int:
+    return sum(b["units"] for b in state["shops"][shop]["stock"] if b["item"] == item)
+
+
+def can_make(state: dict, shop: str, product: str) -> bool:
+    if state["shops"][shop]["owner"] == "bot":
+        return True
+    return all(stock_units(state, shop, i) >= q for i, q in PRODUCTS[product]["uses"].items())
+
+
+def _consume(state: dict, shop: str, product: str) -> None:
+    """Use ingredients for one portion, oldest batch first."""
+    stock = state["shops"][shop]["stock"]
+    for item, qty in PRODUCTS[product]["uses"].items():
+        for batch in sorted((b for b in stock if b["item"] == item), key=lambda b: -b["age"]):
+            take = min(qty, batch["units"])
+            batch["units"] -= take
+            qty -= take
+            if qty == 0:
+                break
+    state["shops"][shop]["stock"] = [b for b in stock if b["units"] > 0]
+
+
+def _shop_items(shop: str) -> set[str]:
+    return {i for p in SHOPS[shop]["products"] for i in PRODUCTS[p]["uses"]}
+
+
+def _require_running(state: dict) -> None:
+    if state["status"] != RUNNING:
+        raise GameError("Das Spiel ist vorbei.")
+
+
+def _require_owned(state: dict, shop: str) -> None:
+    if shop not in SHOPS:
+        raise GameError(f"Unbekannter Laden: {shop}.")
+    if state["shops"][shop]["owner"] != "player":
+        raise GameError("Dieser Laden gehört dir nicht.")
+
+
+def _whole(value, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise GameError(f"{name} muss eine ganze Zahl ab 0 sein.")
+    return value
+
+
+def _pay(state: dict, amount: int) -> None:
+    if amount > state["money"]:
+        raise GameError(f"Nicht genug Geld: {euro(amount)} nötig, du hast {euro(state['money'])}.")
+    state["money"] -= amount
+
+
+def _check_victory(state: dict) -> None:
+    if all(d["owner"] == "player" and d["manager"] for d in state["shops"].values()):
+        state["status"] = VICTORY
+
+
+def _student(state: dict, sid: str) -> dict:
+    if sid not in state["students"]:
+        raise GameError(f"Unbekannter Student: {sid}.")
+    return state["students"][sid]
 
 
 # ---------------------------------------------------------------------------
-# Morning actions
+# Planning and shopping list
 # ---------------------------------------------------------------------------
 
 
-def purchase_cost(quantities: dict[str, int]) -> int:
-    ingredients = CONFIG["ingredients"]
-    return sum(ingredients[i]["cost"] * q for i, q in quantities.items())
-
-
-def buy_ingredients(game: Game, quantities: dict[str, int], shop_id: str = "player_cafe") -> Game:
-    """Buy ingredients at the wholesaler for one of the player's shops."""
-    _require_phase(game, MORNING)
-    _require_player_shop(game, shop_id)
-    allowed = shop_ingredients(shop_id)
-    for ingredient, qty in quantities.items():
-        if ingredient not in allowed:
-            raise GameError(f"{ingredient} is not used by this shop.")
-        if isinstance(qty, bool) or not isinstance(qty, int):
-            raise GameError("Quantities must be whole numbers.")
-        if qty < 0:
-            raise GameError("Quantities cannot be negative.")
-    if not any(q > 0 for q in quantities.values()):
-        raise GameError("Choose at least one ingredient to buy.")
-
-    cost = purchase_cost(quantities)
-    new = copy.deepcopy(game)
-    _pay(new, cost)
-    shop = new.shops[shop_id]
-    for ingredient, qty in quantities.items():
-        shop.inventory[ingredient] = shop.inventory.get(ingredient, 0) + qty
-    new.stats[shop_id].ingredient_cost += cost
-    return new
-
-
-def set_prices(game: Game, shop_id: str, prices: dict[str, int]) -> Game:
-    _require_phase(game, MORNING)
-    shop = _require_player_shop(game, shop_id)
-    for product, price in prices.items():
-        if product not in shop.prices:
-            raise GameError(f"{product} is not sold in this shop.")
-        if isinstance(price, bool) or not isinstance(price, int):
-            raise GameError("Prices must be whole cents.")
-        if price <= 0:
-            raise GameError("Prices must be above €0.00.")
-        if price > CONFIG["max_price"]:
-            raise GameError(f"Prices cannot be above {format_money(CONFIG['max_price'])}.")
-    new = copy.deepcopy(game)
-    new.shops[shop_id].prices.update(prices)
-    return new
-
-
-def buy_upgrade(game: Game, shop_id: str, upgrade: str) -> Game:
-    _require_phase(game, MORNING)
-    shop = _require_player_shop(game, shop_id)
-    if upgrade not in CONFIG["upgrades"]:
-        raise GameError(f"Unknown upgrade: {upgrade}.")
-    if upgrade in shop.upgrades:
-        raise GameError("This upgrade has already been bought for this shop.")
-    cost = CONFIG["upgrades"][upgrade]["cost"]
-    new = copy.deepcopy(game)
-    _pay(new, cost)
-    new.shops[shop_id].upgrades.append(upgrade)
-    new.stats[shop_id].spending += cost
-    return new
-
-
-def hire_employee(game: Game, shop_id: str) -> Game:
-    _require_phase(game, MORNING)
-    shop = _require_player_shop(game, shop_id)
-    if shop.has_employee:
-        raise GameError("This shop already has an employee.")
-    cost = CONFIG["employee_cost"]
-    new = copy.deepcopy(game)
-    _pay(new, cost)
-    new.shops[shop_id].has_employee = True
-    new.stats[shop_id].spending += cost
-    if new.manual_shop == shop_id:
-        others = [s for s in player_shops(new) if not new.shops[s].has_employee]
-        new.manual_shop = others[0] if others else None
-    _check_victory(new)
-    return new
-
-
-def buy_competitor(game: Game) -> Game:
-    _require_phase(game, MORNING)
-    competitor = game.shops["competitor"]
-    if competitor.owner == "player":
-        raise GameError("You already own the competitor.")
-    if not game.shops["player_cafe"].has_employee:
-        raise GameError("Hire an employee in your café before buying the competitor.")
-    cost = CONFIG["acquisition_cost"]
-    new = copy.deepcopy(game)
-    _pay(new, cost)
-    new.shops["competitor"].owner = "player"
-    new.shops["competitor"].inventory = {i: 0 for i in shop_ingredients("competitor")}
-    new.stats["competitor"].spending += cost
-    if new.manual_shop is None:
-        new.manual_shop = "competitor"
-    _check_victory(new)
-    return new
-
-
-def set_manual_shop(game: Game, shop_id: str) -> Game:
-    """Choose which of the player's shops the player serves in person today."""
-    _require_phase(game, MORNING)
-    _require_player_shop(game, shop_id)
-    new = copy.deepcopy(game)
-    new.manual_shop = shop_id
-    return new
-
-
-# ---------------------------------------------------------------------------
-# Demand model
-# ---------------------------------------------------------------------------
-
-
-def offerings(game: Game) -> list[tuple[str, str]]:
-    """All (shop, product) pairs students can buy: 6 in this release."""
-    return [(s, p) for s in SHOP_IDS for p in CONFIG["shops"][s]["products"]]
-
-
-def draw_utilities(seed: int, day: int) -> list[dict[tuple[str, str], float]]:
-    """Base utility u_ij (in cents) per student and offering, new every day."""
-    rng = random.Random(f"{seed}-{day}-utilities")
-    result = []
-    pairs = [(s, p) for s in SHOP_IDS for p in CONFIG["shops"][s]["products"]]
-    for _ in range(CONFIG["student_count"]):
-        result.append(
-            {pair: rng.uniform(CONFIG["utility_min"], CONFIG["utility_max"]) for pair in pairs}
-        )
+def shopping_list(state: dict, plan: dict[str, int]) -> dict[str, int]:
+    """Wholesale units needed: planned portions minus usable stock, rounded up to packs."""
+    need: dict[str, int] = {}
+    for product, portions in plan.items():
+        for item, qty in PRODUCTS[product]["uses"].items():
+            need[item] = need.get(item, 0) + portions * qty
+    result = {}
+    for item, units in need.items():
+        have = sum(stock_units(state, s, item) for s in owned_shops(state))
+        missing = max(0, units - have)
+        packs = math.ceil(missing / ITEMS[item]["base_units"])
+        if packs:
+            result[item] = packs
     return result
 
 
-def best_bundle(
-    utilities: dict[tuple[str, str], float],
-    prices: dict[tuple[str, str], int],
-    factors: dict[str, float],
-    budget: int,
-) -> list[tuple[str, str]]:
-    """Brute-force the bundle that maximizes
-    U = sum(F_s * u_ij) + (budget - sum(p_j)), with sum(p_j) <= budget
-    and at most one coffee in total."""
-    pairs = list(utilities)
-    best: list[tuple[str, str]] = []
-    best_value = float(budget)  # buying nothing keeps the whole budget
-    for size in range(1, len(pairs) + 1):
-        for bundle in itertools.combinations(pairs, size):
-            if sum(1 for _, product in bundle if product == "coffee") > 1:
-                continue
-            spent = sum(prices[pair] for pair in bundle)
-            if spent > budget:
-                continue
-            value = sum(factors[s] * utilities[(s, p)] for s, p in bundle) + (budget - spent)
-            if value > best_value + 1e-9:
-                best_value = value
-                best = list(bundle)
-    return best
-
-
-def generate_demand(game: Game) -> dict[str, list[Order]]:
-    """Today's queue per shop, in random arrival order."""
-    utilities = draw_utilities(game.seed, game.day)
-    prices = {(s, p): game.shops[s].prices[p] for s, p in offerings(game)}
-    factors = {s: shop_factor(game.shops[s]) for s in SHOP_IDS}
-    queues: dict[str, list[Order]] = {s: [] for s in SHOP_IDS}
-    rng = random.Random(f"{game.seed}-{game.day}-arrivals")
-    students = list(range(CONFIG["student_count"]))
-    rng.shuffle(students)
-    for student in students:
-        bundle = best_bundle(utilities[student], prices, factors, CONFIG["student_budget"])
-        for shop_id in SHOP_IDS:
-            items = [p for s, p in bundle if s == shop_id]
-            if items:
-                queues[shop_id].append(Order(student=student, items=items))
-    return queues
+def cart_total(cart: dict[str, int]) -> int:
+    return sum(ITEMS[i]["price"] * q for i, q in cart.items())
 
 
 # ---------------------------------------------------------------------------
-# Selling phase
+# Event handlers
 # ---------------------------------------------------------------------------
 
 
-def order_prep_time(shop: Shop, order: Order) -> int:
-    """Preparation time for the items of an order that are in stock."""
-    stock = dict(shop.inventory)
-    total = 0
-    for item in order.items:
-        ingredient = CONFIG["products"][item]["ingredient"]
-        if stock.get(ingredient, 0) > 0:
-            stock[ingredient] -= 1
-            total += CONFIG["products"][item]["prep_time"]
-    return total
+def _ev_confirm_plan(state, ev):
+    plan = ev.get("plan") or {}
+    sellable = {p for s in owned_shops(state) for p in SHOPS[s]["products"]}
+    for product, portions in plan.items():
+        if product not in sellable:
+            raise GameError(f"{product} verkaufst du nicht.")
+        _whole(portions, "Die geplante Menge")
+    state["plan"] = dict(plan)
+    state["shopping_list"] = shopping_list(state, plan)
+    state["cart_prefilled"] = False
+    if state["day_state"] == MORNING_PLANNING:
+        state["day_state"] = WALK_TO_WHOLESALE
+    return {"toast": "Einkaufszettel erstellt - ab zum Großhandel!",
+            "shopping_list": state["shopping_list"]}
 
 
-def _serve(game: Game, shop_id: str) -> None:
-    """Serve the first order in the queue (game is already a copy)."""
-    shop = game.shops[shop_id]
-    stats = game.stats[shop_id]
-    order = game.queues[shop_id].pop(0)
-    delivered = 0
-    for item in order.items:
-        ingredient = CONFIG["products"][item]["ingredient"]
-        if shop.owner == "bot" or shop.inventory.get(ingredient, 0) > 0:
-            if shop.owner == "player":
-                shop.inventory[ingredient] -= 1
-                stats.time_left -= CONFIG["products"][item]["prep_time"]
-            price = shop.prices[item]
-            stats.revenue += price
-            stats.sold[item] = stats.sold.get(item, 0) + 1
-            if shop.owner == "player":
-                game.balance_cents += price
-            delivered += 1
-    if delivered:
-        stats.served += 1
-    else:
-        stats.lost += 1
+def _ev_enter_wholesaler(state, ev):
+    if state["closed"]:
+        raise GameError("Der Großhandel hat jetzt geschlossen.")
+    state["in_wholesaler"] = True
+    if state["day_state"] in (MORNING_PLANNING, WALK_TO_WHOLESALE):
+        state["day_state"] = WHOLESALE_SHOPPING
+    if not state["cart"] and state["shopping_list"] and not state["cart_prefilled"]:
+        # Only the first visit after planning starts with the shopping list in the cart.
+        state["cart"] = {i: q for i, q in state["shopping_list"].items() if item_available(state, i)}
+        state["cart_prefilled"] = True
+    return {}
 
 
-def _employee_serves(game: Game, shop_id: str) -> None:
-    """An employee works through the queue; orders that do not fit are lost."""
-    shop = game.shops[shop_id]
-    while game.queues[shop_id]:
-        order = game.queues[shop_id][0]
-        if order_prep_time(shop, order) <= game.stats[shop_id].time_left:
-            _serve(game, shop_id)
-        else:
-            game.queues[shop_id].pop(0)
-            game.stats[shop_id].lost += 1
+def _ev_leave_wholesaler(state, ev):
+    if state["cart"]:
+        raise GameError("Du hast noch unbezahlte Ware im Warenkorb. Bezahl an der Kasse oder leg sie zurück.")
+    state["in_wholesaler"] = False
+    return {}
 
 
-def open_shop(game: Game) -> Game:
-    """Start the selling phase: generate demand, let bot and employees work."""
-    _require_phase(game, MORNING)
-    new = copy.deepcopy(game)
-    new.queues = generate_demand(new)
-    for shop_id in SHOP_IDS:
-        new.stats[shop_id].time_left = CONFIG["day_time_budget"]
-    for shop_id in SHOP_IDS:
-        shop = new.shops[shop_id]
-        if shop.owner == "bot":
-            while new.queues[shop_id]:
-                _serve(new, shop_id)
-        elif shop.has_employee:
-            _employee_serves(new, shop_id)
-        elif shop_id != new.manual_shop:
-            # Nobody works in this shop today: all customers leave.
-            new.stats[shop_id].lost += len(new.queues[shop_id])
-            new.queues[shop_id] = []
-    new.phase = SELLING
-    return new
+def _ev_set_cart_item(state, ev):
+    if not state["in_wholesaler"]:
+        raise GameError("Du bist nicht im Großhandel.")
+    item = ev.get("item")
+    if item not in ITEMS or not item_available(state, item):
+        raise GameError("Diese Ware gibt es hier nicht.")
+    qty = _whole(ev.get("qty"), "Die Menge")
+    if qty:
+        state["cart"][item] = qty
+        return {"toast": f"{qty}x {ITEMS[item]['name']} im Warenkorb"}
+    state["cart"].pop(item, None)
+    return {"toast": f"{ITEMS[item]['name']} aus dem Warenkorb genommen"}
 
 
-def accept_next_order(game: Game, shop_id: str | None = None) -> Game:
-    """The player prepares the next order in the shop they serve today."""
-    _require_phase(game, SELLING)
-    shop_id = shop_id or game.manual_shop
-    if shop_id is None or shop_id != game.manual_shop:
-        raise GameError("You are not serving this shop today.")
-    if not game.queues.get(shop_id):
-        raise GameError("There are no orders waiting.")
-    shop = game.shops[shop_id]
-    needed = order_prep_time(shop, game.queues[shop_id][0])
-    if needed > game.stats[shop_id].time_left:
-        raise GameError(
-            f"Not enough time left: this order needs {needed} s, "
-            f"only {game.stats[shop_id].time_left} s remain."
+def _ev_pay(state, ev):
+    if not state["in_wholesaler"]:
+        raise GameError("Du bist nicht im Großhandel.")
+    if not state["cart"]:
+        raise GameError("Dein Warenkorb ist leer.")
+    total = cart_total(state["cart"])
+    _pay(state, total)
+    for item, qty in state["cart"].items():
+        state["bag"][item] = state["bag"].get(item, 0) + qty
+    state["cart"] = {}
+    state["stats"]["purchase_cost"] += total
+    if state["day_state"] in (MORNING_PLANNING, WALK_TO_WHOLESALE, WHOLESALE_SHOPPING):
+        state["day_state"] = WALK_TO_CAFE
+    return {"toast": f"Einkauf bezahlt: {euro(total)}"}
+
+
+def _ev_stock_goods(state, ev):
+    shop = ev.get("shop", "cafe")
+    _require_owned(state, shop)
+    usable = _shop_items(shop)
+    moved = {i: q for i, q in state["bag"].items() if i in usable}
+    if not moved:
+        raise GameError("In deiner Tasche ist nichts für diesen Laden.")
+    for item, packs in moved.items():
+        state["shops"][shop]["stock"].append(
+            {"item": item, "units": packs * ITEMS[item]["base_units"], "age": 0}
         )
-    new = copy.deepcopy(game)
-    _serve(new, shop_id)
-    return new
+        del state["bag"][item]
+    if state["day_state"] in (MORNING_PLANNING, WALK_TO_WHOLESALE, WHOLESALE_SHOPPING, WALK_TO_CAFE):
+        state["day_state"] = SET_PRICES if not state["open"] else SHOP_OPEN
+    return {"toast": "Waren eingeräumt"}
 
 
-def end_day(game: Game) -> Game:
-    """Close the shops: lost customers, spoilage, statistics, game-over check."""
-    _require_phase(game, SELLING)
-    new = copy.deepcopy(game)
-    for shop_id in SHOP_IDS:
-        new.stats[shop_id].lost += len(new.queues[shop_id])
-        new.queues[shop_id] = []
-        shop = new.shops[shop_id]
-        if shop.owner == "player":
-            spoiled = sum(
-                CONFIG["ingredients"][i]["cost"] * q for i, q in shop.inventory.items()
-            )
-            new.stats[shop_id].spoiled_value = spoiled
-            shop.inventory = {i: 0 for i in shop.inventory}
-
-    summary = day_summary(new)
-    new.history.append(summary)
-    new.total_profit += summary["profit"]
-    new.phase = SUMMARY
-    if new.balance_cents <= 0:
-        new.status = GAME_OVER
-        new.phase = FINISHED
-    return new
+def _ev_set_prices(state, ev):
+    shop = ev.get("shop", "cafe")
+    _require_owned(state, shop)
+    if state["open"] or state["closed"]:
+        raise GameError("Preise kannst du nur vor der Öffnung ändern.")
+    prices = ev.get("prices") or {}
+    for product, price in prices.items():
+        if product not in SHOPS[shop]["products"]:
+            raise GameError(f"{product} gibt es in diesem Laden nicht.")
+        if isinstance(price, bool) or not isinstance(price, int):
+            raise GameError("Preise müssen ganze Cent-Beträge sein.")
+        if price <= 0 or price > CONFIG["max_price"] or price % CONFIG["price_step"]:
+            raise GameError(f"Preise zwischen 0,10 € und {euro(CONFIG['max_price'])} in 0,10-€-Schritten.")
+    state["shops"][shop]["prices"].update(prices)
+    return {"toast": "Preise übernommen"}
 
 
-def next_day(game: Game) -> Game:
-    _require_phase(game, SUMMARY)
-    new = copy.deepcopy(game)
-    new.day += 1
-    new.phase = MORNING
-    new.queues = {s: [] for s in SHOP_IDS}
-    new.stats = _empty_stats()
-    if new.manual_shop is None or new.shops[new.manual_shop].has_employee:
-        unstaffed = [s for s in player_shops(new) if not new.shops[s].has_employee]
-        new.manual_shop = unstaffed[0] if unstaffed else None
-    return new
+def _open(state) -> dict:
+    state["open"] = True
+    state["day_state"] = SHOP_OPEN
+    return {"toast": "Geöffnet - die ersten Kunden kommen", "opened": True}
 
 
-# ---------------------------------------------------------------------------
-# Statistics
-# ---------------------------------------------------------------------------
+def _ev_open_shop(state, ev):
+    if state["open"]:
+        raise GameError("Der Laden ist schon geöffnet.")
+    if state["closed"]:
+        raise GameError("Der Laden hat heute schon geschlossen.")
+    if state["time"] < T["earliest_manual_open"]:
+        raise GameError("Öffnen kannst du frühestens um 07:00 Uhr.")
+    return _open(state)
 
 
-def day_summary(game: Game) -> dict:
-    """Statistics of the current day, per shop and in total."""
-    total_revenue_all = sum(game.stats[s].revenue for s in SHOP_IDS)
-    shops = {}
-    profit = 0
-    player_revenue = 0
-    for shop_id in SHOP_IDS:
-        st = game.stats[shop_id]
-        owned = game.shops[shop_id].owner == "player"
-        shop_profit = st.revenue - st.ingredient_cost - st.spending if owned else 0
-        if owned:
-            profit += shop_profit
-            player_revenue += st.revenue
-        shops[shop_id] = {
-            "owner": game.shops[shop_id].owner,
-            "sold": dict(st.sold),
-            "revenue": st.revenue,
-            "ingredient_cost": st.ingredient_cost,
-            "spoiled_value": st.spoiled_value,
-            "spending": st.spending,
-            "profit": shop_profit,
-            "served": st.served,
-            "lost": st.lost,
-        }
-    share = player_revenue / total_revenue_all if total_revenue_all else 0.0
-    return {
-        "day": game.day,
-        "shops": shops,
+def _close(state) -> dict:
+    """20:00: no new orders, waiting customers leave, an unfinished order is cancelled."""
+    state["open"] = False
+    state["closed"] = True
+    state["day_state"] = CLOSING
+    cancelled = None
+    if state["current_order"]:
+        cancelled = state["current_order"]["student"]
+        state["current_order"] = None
+        state["tray"] = []
+    for s in state["students"].values():
+        if s["status"] in (st.QUEUING, st.BEING_SERVED, st.WALKING_TO_SHOP):
+            s["status"] = st.WANDERING
+            s["intent"] = None
+    return {"closed": True, "cancelled": cancelled}
+
+
+def _end_day(state) -> dict:
+    """Spoilage, statistics, reputation for missed cleaning, game-over check."""
+    if not all(state["cleaning"].values()):
+        _change_reputation(state, CONFIG["reputation"]["cleaning_missed"])
+    spoiled_value = 0
+    spoiled = {}
+    for shop in owned_shops(state):
+        kept = []
+        for batch in state["shops"][shop]["stock"]:
+            batch["age"] += 1
+            shelf = ITEMS[batch["item"]]["shelf_days"]
+            if shelf is not None and batch["age"] >= shelf:
+                value = round(batch["units"] * ITEMS[batch["item"]]["price"] / ITEMS[batch["item"]]["base_units"])
+                spoiled_value += value
+                spoiled[batch["item"]] = spoiled.get(batch["item"], 0) + batch["units"]
+            else:
+                kept.append(batch)
+        state["shops"][shop]["stock"] = kept
+
+    stats = state["stats"]
+    revenue = sum(stats["shops"][s]["revenue"] for s in owned_shops(state))
+    profit = revenue - stats["purchase_cost"] - stats["spending"]
+    total_market = revenue + stats["rival_revenue"]
+    sold: dict[str, int] = {}
+    for s in owned_shops(state):
+        for p, n in stats["shops"][s]["sold"].items():
+            sold[p] = sold.get(p, 0) + n
+    summary = {
+        "day": state["day"],
+        "revenue": revenue,
+        "purchase_cost": stats["purchase_cost"],
+        "spending": stats["spending"],
+        "spoiled_value": spoiled_value,
+        "spoiled": spoiled,
         "profit": profit,
-        "market_share": round(share, 4),
-        "balance": game.balance_cents,
+        "sold": sold,
+        "plan": dict(state["plan"]),
+        "served": sum(stats["shops"][s]["served"] for s in owned_shops(state)),
+        "lost": sum(stats["shops"][s]["lost"] for s in owned_shops(state)),
+        "wrong": sum(stats["shops"][s]["wrong"] for s in owned_shops(state)),
+        "reputation": round(state["reputation"]),
+        "market_share": round(revenue / total_market, 4) if total_market else 0.0,
+        "money": state["money"],
     }
+    state["summary"] = summary
+    state["history"].append(summary)
+    state["total_profit"] += profit
+    state["day_state"] = DAY_SUMMARY
+    state["open"] = False
+    state["closed"] = True
+    if state["money"] <= 0:
+        state["status"] = GAME_OVER
+    return {"summary": summary}
+
+
+def _ev_tick(state, ev):
+    """The browser reports that the clock passed an important time."""
+    result = {}
+    t = state["time"]
+    if not state["open"] and not state["closed"] and t >= T["open"]:
+        result.update(_open(state))
+    if t >= T["last_customer"] and not state["last_call"]:
+        state["last_call"] = True
+        result["toast"] = "Letzte Kunden"
+    if t >= T["close"] and not state["closed"]:
+        result.update(_close(state))
+    if t >= T["day_end"] and state["day_state"] != DAY_SUMMARY:
+        if not state["closed"]:
+            _close(state)
+        result.update(_end_day(state))
+    return result
+
+
+def _ev_clean(state, ev):
+    spot = ev.get("spot")
+    if spot not in CONFIG["cleaning_spots"]:
+        raise GameError("Unbekannte Putzstelle.")
+    if not state["closed"] or state["day_state"] != CLOSING:
+        raise GameError("Aufräumen geht erst nach Ladenschluss.")
+    state["cleaning"][spot] = True
+    result = {"toast": "Erledigt"}
+    if all(state["cleaning"].values()):
+        result.update(_end_day(state))
+    return result
+
+
+def _ev_next_day(state, ev):
+    _require_running(state)
+    if state["day_state"] != DAY_SUMMARY:
+        raise GameError("Der Tag ist noch nicht vorbei.")
+    _start_day(state, state["day"] + 1)
+    return {"new_day": state["day"]}
+
+
+# Progression ----------------------------------------------------------------
+
+
+def _ev_buy_upgrade(state, ev):
+    shop, upgrade = ev.get("shop", "cafe"), ev.get("upgrade")
+    _require_owned(state, shop)
+    if upgrade not in CONFIG["upgrades"]:
+        raise GameError("Unbekanntes Upgrade.")
+    if upgrade in state["shops"][shop]["upgrades"]:
+        raise GameError("Dieses Upgrade hast du schon.")
+    cost = CONFIG["upgrades"][upgrade]["cost"]
+    _pay(state, cost)
+    state["shops"][shop]["upgrades"].append(upgrade)
+    state["stats"]["spending"] += cost
+    return {"toast": f"{CONFIG['upgrades'][upgrade]['name']} gekauft"}
+
+
+def _ev_hire_manager(state, ev):
+    shop = ev.get("shop", "cafe")
+    _require_owned(state, shop)
+    if state["shops"][shop]["manager"]:
+        raise GameError("Hier arbeitet schon ein Manager.")
+    _pay(state, CONFIG["manager_cost"])
+    state["shops"][shop]["manager"] = True
+    state["stats"]["spending"] += CONFIG["manager_cost"]
+    _check_victory(state)
+    return {"toast": "Manager eingestellt"}
+
+
+def _ev_buy_competitor(state, ev):
+    rival = state["shops"]["rival"]
+    if rival["owner"] == "player":
+        raise GameError("Das Café gehört dir schon.")
+    if not state["shops"]["cafe"]["manager"]:
+        raise GameError("Stell zuerst einen Manager in deinem Café ein.")
+    _pay(state, CONFIG["acquisition_cost"])
+    rival["owner"] = "player"
+    rival["stock"] = []
+    state["stats"]["spending"] += CONFIG["acquisition_cost"]
+    state["plan"].update({p: 0 for p in SHOPS["rival"]["products"] if p not in state["plan"]})
+    _check_victory(state)
+    return {"toast": f"{SHOPS['rival']['name']} gehört jetzt dir!"}
+
+
+# Students and sales -----------------------------------------------------------
+
+
+def _decide(state, sid: str, exclude: set[str] = frozenset(), sold_out: set[str] = frozenset()) -> dict:
+    """Re-decide where to buy (or not) with the utility model."""
+    student = state["students"][sid]
+    shops = [s for s in SHOPS if s not in exclude]
+    if state["closed"] or state["time"] >= T["last_customer"]:
+        shops = []
+    choice = st.choose_order(
+        student, offer_prices(state), {s: shop_factor(state, s) for s in SHOPS}, shops, sold_out
+    ) if shops else None
+    if choice is None:
+        student["intent"] = None
+        if student["status"] != st.WANDERING:
+            st.transition(student, "give_up")
+        return {"action": "wander"}
+    shop, items = choice
+    st.transition(student, "go_to_shop")
+    student["intent"] = {"shop": shop, "items": items}
+    return {"action": "shop", "shop": shop, "items": items}
+
+
+def _ev_student_arrive(state, ev):
+    student = _student(state, ev["student"])
+    if student["status"] != st.OFF_MAP:
+        return {"ignored": True}  # already on campus (event repeated)
+    st.transition(student, "arrive")
+    return {}
+
+
+def _ev_student_leave(state, ev):
+    """A student walks off the map (lecture or home). Repeated events are ignored."""
+    student = _student(state, ev["student"])
+    if student["status"] == st.OFF_MAP:
+        return {"ignored": True}
+    if student["status"] in (st.QUEUING, st.BEING_SERVED):
+        if state["current_order"] and state["current_order"]["student"] == student["id"]:
+            state["current_order"] = None
+            state["tray"] = []
+        st.transition(student, "give_up")
+    st.transition(student, "leave")
+    student["intent"] = None
+    return {}
+
+
+def _ev_decide(state, ev):
+    student = _student(state, ev["student"])
+    if student["status"] != st.WANDERING:
+        return {"action": "busy"}
+    # Use the scheduled decision time, so the result does not depend on frame timing or speed.
+    at = float(ev.get("at", state["time"]))
+    if not st.wants_to_visit(state["seed"], state["day"], student, at):
+        return {"action": "wander"}
+    return _decide(state, ev["student"])
+
+
+def _ev_join_queue(state, ev):
+    student = _student(state, ev["student"])
+    intent = student.get("intent")
+    if not intent or intent["shop"] != ev.get("shop"):
+        raise GameError("Dieser Student wollte nicht in diesen Laden.")
+    if state["closed"]:
+        return _decide(state, student["id"])
+    st.transition(student, "join_queue")
+    return {}
+
+
+def _ev_queue_full(state, ev):
+    student = _student(state, ev["student"])
+    return _decide(state, student["id"], exclude={ev.get("shop")})
+
+
+def _ev_at_counter(state, ev):
+    """A student reaches the counter: which of the wanted items can the shop make?"""
+    student = _student(state, ev["student"])
+    shop = ev.get("shop")
+    if student["status"] != st.QUEUING or not student["intent"] or student["intent"]["shop"] != shop:
+        raise GameError("Dieser Student steht nicht an dieser Theke.")
+    if not state["open"]:
+        raise GameError("Der Laden ist nicht geöffnet.")
+    sold_out = [p for p in student["intent"]["items"] if not can_make(state, shop, p)]
+    if not sold_out:
+        return {"items": student["intent"]["items"], "sold_out": []}
+    # Re-decide without the sold-out products: something else here, the other café, or nothing.
+    st.transition(student, "give_up")
+    decision = _decide(state, student["id"], sold_out={st.offering_key(shop, p) for p in sold_out})
+    if decision["action"] == "shop" and decision["shop"] == shop:
+        st.transition(student, "join_queue")  # stays at the counter with the new order
+        return {"items": decision["items"], "sold_out": sold_out}
+    return {"items": [], "sold_out": sold_out, "leaves": True, "decision": decision}
+
+
+def _require_manual(state, shop: str, ev: dict) -> None:
+    _require_owned(state, shop)
+    if is_auto(state, shop):
+        raise GameError("Hier bedient dein Manager.")
+    if not state["open"]:
+        raise GameError("Der Laden ist nicht geöffnet.")
+    if not ev.get("player_inside"):
+        raise GameError("Du musst im Laden sein, um zu bedienen.")
+
+
+def _ev_accept(state, ev):
+    shop = ev.get("shop", "cafe")
+    _require_manual(state, shop, ev)
+    if state["current_order"]:
+        raise GameError("Du bearbeitest schon eine Bestellung.")
+    student = _student(state, ev["student"])
+    if student["status"] != st.QUEUING or student["intent"]["shop"] != shop:
+        raise GameError("Dieser Student wartet nicht an deiner Theke.")
+    items = [p for p in student["intent"]["items"] if can_make(state, shop, p)]
+    if not items:
+        raise GameError("Nichts von dieser Bestellung ist vorrätig.")
+    student["intent"]["items"] = items
+    st.transition(student, "accepted")
+    state["current_order"] = {"shop": shop, "student": student["id"], "items": items,
+                              "accepted_at": state["time"]}
+    state["tray"] = []
+    return {"order": state["current_order"]}
+
+
+def _ev_reject(state, ev):
+    shop = ev.get("shop", "cafe")
+    student = _student(state, ev["student"])
+    if student["status"] != st.QUEUING:
+        raise GameError("Dieser Student wartet nicht an der Theke.")
+    return _decide(state, student["id"], exclude={shop})
+
+
+def _ev_prepare(state, ev):
+    shop, product = ev.get("shop", "cafe"), ev.get("product")
+    _require_manual(state, shop, ev)
+    if not state["current_order"] or state["current_order"]["shop"] != shop:
+        raise GameError("Nimm zuerst eine Bestellung an.")
+    if product not in SHOPS[shop]["products"]:
+        raise GameError("Das gibt es in diesem Laden nicht.")
+    if not can_make(state, shop, product):
+        raise GameError(f"{PRODUCTS[product]['name']} ist ausverkauft.")
+    _consume(state, shop, product)
+    state["tray"].append(product)
+    return {"toast": f"{PRODUCTS[product]['name']} fertig", "tray": list(state["tray"])}
+
+
+def _sell(state, shop: str, student: dict, products: list[str]) -> int:
+    """Book a sale: money (for player shops), statistics, student's budget."""
+    prices = state["shops"][shop]["prices"]
+    amount = sum(prices[p] for p in products)
+    stats = state["stats"]["shops"][shop]
+    if state["shops"][shop]["owner"] == "player":
+        state["money"] += amount
+        stats["revenue"] += amount
+    else:
+        state["stats"]["rival_revenue"] += amount
+    for p in products:
+        stats["sold"][p] = stats["sold"].get(p, 0) + 1
+    stats["served"] += 1
+    student["budget"] -= amount
+    student["purchases"].append({"shop": shop, "items": list(products), "time": state["time"]})
+    return amount
+
+
+def _change_reputation(state, delta: float) -> None:
+    state["reputation"] = max(0, min(100, state["reputation"] + delta))
+
+
+def _ev_handover(state, ev):
+    shop = ev.get("shop", "cafe")
+    _require_manual(state, shop, ev)
+    order = state["current_order"]
+    if not order or order["student"] != ev.get("student"):
+        raise GameError("Diese Bestellung ist nicht in Arbeit.")
+    student = _student(state, order["student"])
+    remaining = list(state["tray"])
+    delivered = []
+    for p in order["items"]:
+        if p in remaining:
+            remaining.remove(p)
+            delivered.append(p)
+    correct = len(delivered) == len(order["items"]) and not remaining
+    amount = _sell(state, shop, student, delivered) if delivered else 0
+    rep = CONFIG["reputation"]
+    if correct:
+        fast = (state["time"] - order["accepted_at"]) * 60 <= T["fast_service_minutes"]
+        _change_reputation(state, rep["correct_order"] + (rep["fast_bonus"] if fast else 0))
+        toast = f"Kunde zufrieden: +{euro(amount)}"
+    else:
+        state["stats"]["shops"][shop]["wrong"] += 1
+        _change_reputation(state, rep["wrong_order"])
+        toast = f"Falsche Bestellung - Kunde unzufrieden (+{euro(amount)})"
+    st.transition(student, "served")
+    student["intent"] = None
+    state["current_order"] = None
+    state["tray"] = []
+    return {"toast": toast, "amount": amount, "correct": correct}
+
+
+def _ev_patience_expired(state, ev):
+    student = _student(state, ev["student"])
+    shop = ev.get("shop")
+    if student["status"] not in (st.QUEUING, st.BEING_SERVED):
+        return {"action": "ignored"}
+    if state["shops"][shop]["owner"] == "player":
+        state["stats"]["shops"][shop]["lost"] += 1
+        _change_reputation(state, CONFIG["reputation"]["customer_lost"])
+    if state["current_order"] and state["current_order"]["student"] == student["id"]:
+        state["current_order"] = None
+        state["tray"] = []
+    result = _decide(state, student["id"], exclude={shop})
+    result["toast"] = "Kunde ist gegangen"
+    return result
+
+
+def _ev_auto_serve(state, ev):
+    """Bot or manager serves the student at the front of the queue."""
+    shop = ev.get("shop")
+    if not is_auto(state, shop):
+        raise GameError("Hier muss jemand selbst bedienen.")
+    if not state["open"]:
+        raise GameError("Der Laden ist nicht geöffnet.")
+    student = _student(state, ev["student"])
+    if student["status"] != st.QUEUING or not student["intent"] or student["intent"]["shop"] != shop:
+        raise GameError("Dieser Student wartet nicht hier.")
+    items = []
+    for p in student["intent"]["items"]:
+        if can_make(state, shop, p):
+            if state["shops"][shop]["owner"] == "player":
+                _consume(state, shop, p)
+            items.append(p)
+    amount = _sell(state, shop, student, items) if items else 0
+    if not items and state["shops"][shop]["owner"] == "player":
+        state["stats"]["shops"][shop]["lost"] += 1
+    st.transition(student, "served")
+    student["intent"] = None
+    return {"items": items, "amount": amount}
+
+
+def _ev_resume(state, ev):
+    """Continuing a saved game: students in a queue or on their way start fresh on campus."""
+    for s in state["students"].values():
+        if s["status"] in (st.WALKING_TO_SHOP, st.QUEUING, st.BEING_SERVED):
+            s["status"] = st.WANDERING
+            s["intent"] = None
+    state["current_order"] = None
+    state["tray"] = []
+    return {}
+
+
+HANDLERS = {
+    "resume": _ev_resume,
+    "confirm_plan": _ev_confirm_plan,
+    "enter_wholesaler": _ev_enter_wholesaler,
+    "leave_wholesaler": _ev_leave_wholesaler,
+    "set_cart_item": _ev_set_cart_item,
+    "pay": _ev_pay,
+    "stock_goods": _ev_stock_goods,
+    "set_prices": _ev_set_prices,
+    "open_shop": _ev_open_shop,
+    "tick": _ev_tick,
+    "clean": _ev_clean,
+    "next_day": _ev_next_day,
+    "buy_upgrade": _ev_buy_upgrade,
+    "hire_manager": _ev_hire_manager,
+    "buy_competitor": _ev_buy_competitor,
+    "student_arrive": _ev_student_arrive,
+    "student_leave": _ev_student_leave,
+    "decide": _ev_decide,
+    "join_queue": _ev_join_queue,
+    "queue_full": _ev_queue_full,
+    "at_counter": _ev_at_counter,
+    "accept": _ev_accept,
+    "reject": _ev_reject,
+    "prepare": _ev_prepare,
+    "handover": _ev_handover,
+    "patience_expired": _ev_patience_expired,
+    "auto_serve": _ev_auto_serve,
+}
+
+
+
+def apply(state: dict, event: dict) -> tuple[dict, dict]:
+    """Apply one event. Returns (new_state, result). Raises GameError if not allowed."""
+    kind = event.get("type")
+    if kind not in HANDLERS:
+        raise GameError(f"Unbekanntes Ereignis: {kind}.")
+    if state["status"] != RUNNING:
+        raise GameError("Das Spiel ist vorbei.")
+    new = copy.deepcopy(state)
+    if "t" in event:
+        t = float(event["t"])
+        if t < new["time"] - 1e-6 and kind != "next_day":
+            t = new["time"]  # time never runs backwards
+        new["time"] = min(max(t, T["day_start"]), T["day_end"])
+    try:
+        result = HANDLERS[kind](new, event)
+    except st.TransitionError as error:
+        raise GameError(str(error)) from error
+    return new, result or {}
+
+
+# ---------------------------------------------------------------------------
+# What the browser needs to know
+# ---------------------------------------------------------------------------
+
+
+OBJECTIVES = {
+    MORNING_PLANNING: "Geh zur Planungstafel im Café und plane deinen Tag.",
+    WALK_TO_WHOLESALE: "Lauf zum Großhandel - folge der Markierung.",
+    WHOLESALE_SHOPPING: "Leg die Waren in den Warenkorb und bezahl an der Kasse.",
+    WALK_TO_CAFE: "Bring die Einkäufe ins Café und räum sie ein.",
+    SET_PRICES: "Setz deine Preise an der Theke und öffne den Laden.",
+    SHOP_OPEN: "Bediene deine Kunden an der Theke.",
+    CLOSING: "Räum das Café auf.",
+    DAY_SUMMARY: "Sieh dir die Tagesbilanz an.",
+}
+
+
+def objective(state: dict) -> str:
+    if state["status"] == VICTORY:
+        return "Monopol erreicht!"
+    if state["status"] == GAME_OVER:
+        return "Pleite - neues Spiel?"
+    ds = state["day_state"]
+    if ds == SHOP_OPEN and all(state["shops"][s]["manager"] for s in owned_shops(state)):
+        return "Dein Manager bedient. Plane den nächsten Schritt!"
+    if ds == CLOSING:
+        done = sum(state["cleaning"].values())
+        return f"Räum das Café auf ({done}/{len(state['cleaning'])})."
+    if ds == WALK_TO_WHOLESALE and state["bag"]:
+        return OBJECTIVES[WALK_TO_CAFE]
+    return OBJECTIVES[ds]
+
+
+def view(state: dict) -> dict:
+    """Everything the browser shows. Utilities stay secret in Python."""
+    shops = {}
+    for s in SHOPS:
+        d = state["shops"][s]
+        stock = {}
+        for b in d["stock"]:
+            entry = stock.setdefault(b["item"], {"units": 0, "batches": []})
+            entry["units"] += b["units"]
+            shelf = ITEMS[b["item"]]["shelf_days"]
+            entry["batches"].append({"units": b["units"], "days_left": None if shelf is None else shelf - b["age"]})
+        shops[s] = {
+            "owner": d["owner"], "prices": d["prices"], "upgrades": d["upgrades"],
+            "manager": d["manager"], "auto": is_auto(state, s), "factor": shop_factor(state, s),
+            "stock": stock,
+            "can_make": {p: can_make(state, s, p) for p in SHOPS[s]["products"]},
+        }
+    return {
+        "day": state["day"],
+        "time": state["time"],
+        "status": state["status"],
+        "day_state": state["day_state"],
+        "objective": objective(state),
+        "money": state["money"],
+        "reputation": round(state["reputation"]),
+        "shops": shops,
+        "plan": state["plan"],
+        "shopping_list": state["shopping_list"],
+        "cart": state["cart"],
+        "cart_total": cart_total(state["cart"]),
+        "bag": state["bag"],
+        "in_wholesaler": state["in_wholesaler"],
+        "open": state["open"],
+        "closed": state["closed"],
+        "current_order": state["current_order"],
+        "tray": state["tray"],
+        "cleaning": state["cleaning"],
+        "summary": state["summary"],
+        "yesterday": state["history"][-1] if state["history"] else None,
+        "total_profit": state["total_profit"],
+        "can_buy_competitor": state["shops"]["rival"]["owner"] == "bot" and state["shops"]["cafe"]["manager"],
+        "students": {
+            sid: {"name": s["name"], "status": s["status"], "intent": s["intent"],
+                  "traits": s["traits"], "look": s["look"]}
+            for sid, s in state["students"].items()
+        },
+    }
+
+
+def day_plan(state: dict) -> dict:
+    """Per-day data for the browser: who is on campus when, and when they think about buying."""
+    return {"day": state["day"], "seed": state["seed"], "schedule": state["schedule"]}
