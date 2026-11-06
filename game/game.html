@@ -3,7 +3,7 @@
   <div id="overlay-labels"></div>
   <div id="hud" class="hidden">
     <div id="hud-left" class="glass">
-      <div class="hud-small">Ruf</div>
+      <div class="hud-small">Reputation</div>
       <div id="rep-bar"><div id="rep-fill"></div></div>
       <div id="rep-value" class="hud-small"></div>
     </div>
@@ -11,7 +11,7 @@
     <div id="hud-right" class="glass">
       <div class="clock-row">
         <div id="clock">05:00</div>
-        <div id="day">Tag 1</div>
+        <div id="day">Day 1</div>
       </div>
       <div class="speed-row">
         <button class="speed" data-speed="1">1x</button>
@@ -20,14 +20,22 @@
         <button class="speed" data-speed="8">8x</button>
         <button id="pause-btn" title="Pause (P)">❚❚</button>
       </div>
-      <div id="money">50,00 €</div>
+      <div id="money">€50.00</div>
     </div>
     <div id="tray" class="glass hidden"></div>
-    <div id="help" class="glass">⬆⬇⬅➡ / WASD laufen · E benutzen · Tab Liste · P Pause</div>
+    <div id="help" class="glass">WASD walk · Shift run · Mouse look (click the game) · E use · Tab list · P pause</div>
+    <div id="crosshair" class="hidden"></div>
+    <div id="minimap" class="glass"><canvas id="minimap-canvas" width="200" height="200"></canvas>
+      <div id="legend">
+        <span><i class="lg cafe"></i>Your café</span><span><i class="lg rival"></i>Competitor</span>
+        <span><i class="lg whole"></i>Wholesaler</span><span><i class="lg you"></i>You</span>
+        <span><i class="lg stud"></i>Students</span><span><i class="lg goal"></i>Next goal</span>
+      </div>
+    </div>
   </div>
   <div id="tab-panel" class="glass hidden"></div>
   <div id="toasts"></div>
   <div id="modal-layer" class="hidden"><div id="dialog"></div></div>
   <div id="fade"></div>
-  <div id="loading">Campus wird gebaut ...</div>
+  <div id="loading">Building the campus ...</div>
 </div>

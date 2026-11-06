@@ -17,12 +17,13 @@ uv run pytest
 ## Controls
 | Action | Key |
 |---|---|
-| Walk | Arrow keys or WASD |
-| Use / talk | E or left click |
+| Walk | WASD (or arrow keys), hold Shift to run |
+| Look around | Click the game to capture the mouse, then move the mouse (Esc releases it). Right mouse drag also works |
+| Zoom | Mouse wheel |
+| Use / talk | E, or left click (crosshair while the mouse is captured) |
 | Confirm / cancel pop-up | Enter / Esc |
 | Shopping list and stock | Tab (hold) |
 | Pause | P or the pause button |
-| Rotate / zoom camera | Right mouse drag / mouse wheel |
 | Game speed | 1x 2x 4x 8x buttons |
 
 ## How a day works
@@ -34,6 +35,6 @@ uv run pytest
 
 ## Documents
 - Product brief v2 (source of truth): `docs/product-brief-v2.md`
-- Task spec: `specs/v2-campus-game.md`
+- Task specs: `specs/v3-fixes.md` (current), `specs/v2-campus-game.md`
 - Architecture: `docs/architecture.md`, assumptions: `docs/assumptions.md`
 - Rules for coding agents: `AGENTS.md` (Claude Code reads `CLAUDE.md`, which imports it)

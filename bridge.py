@@ -12,6 +12,7 @@ import logic
 
 def process_batch(state: dict, events: list[dict]) -> tuple[dict, list[dict]]:
     results = []
+    logic.migrate(state)  # saves from older versions keep working
     for event in events:
         cid = event.get("cid")
         try:

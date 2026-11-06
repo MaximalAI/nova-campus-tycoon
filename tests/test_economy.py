@@ -27,7 +27,7 @@ def test_shopping_list_in_wholesale_units(game):
     # 30 coffee -> 2 packs of 25, 5 juices -> 15 oranges -> 3 nets of 6, 12 nata -> 12 pieces
     assert res["shopping_list"] == {"coffee_beans": 2, "oranges": 3, "nata": 12}
     assert state["day_state"] == logic.WALK_TO_WHOLESALE
-    assert res["toast"].startswith("Einkaufszettel erstellt")
+    assert res["toast"].startswith("Shopping list ready")
 
 
 def test_shopping_list_subtracts_usable_stock(game):
@@ -62,20 +62,20 @@ def test_pay_moves_cart_into_bag(game):
     assert state["money"] == 5_000 - 400 - 600
     assert state["bag"] == {"coffee_beans": 1, "nata": 10}
     assert state["cart"] == {}
-    assert res["toast"] == "Einkauf bezahlt: 10,00 €"
+    assert res["toast"] == "Purchase paid: €10.00"
     assert state["day_state"] == logic.WALK_TO_CAFE
 
 
 def test_cart_above_balance_blocks_payment(game):
     state = shop_at_wholesaler(game, {"coffee_beans": 13})  # 52 €
-    with pytest.raises(GameError, match="Nicht genug Geld"):
+    with pytest.raises(GameError, match="Not enough money"):
         go(state, type="pay")
     assert state["money"] == 5_000
 
 
 def test_unpaid_cart_blocks_the_exit(game):
     state = shop_at_wholesaler(game, {"oranges": 1})
-    with pytest.raises(GameError, match="unbezahlte Ware"):
+    with pytest.raises(GameError, match="unpaid goods"):
         go(state, type="leave_wholesaler")
     state, _ = go(state, type="set_cart_item", item="oranges", qty=0)
     state, _ = go(state, type="leave_wholesaler")
@@ -119,7 +119,7 @@ def test_open_rules(game):
     with pytest.raises(GameError):
         go(game, t=6.5, type="open_shop")
     state, res = go(game, t=7.2, type="open_shop")
-    assert state["open"] and res["toast"].startswith("Geöffnet")
+    assert state["open"] and res["toast"].startswith("Open")
 
 
 def test_cafe_opens_automatically_at_8(game):
@@ -161,8 +161,8 @@ def test_ingredients_are_used_oldest_first(game):
 
 
 def test_euro_format():
-    assert logic.euro(3450) == "34,50 €"
-    assert logic.euro(-90) == "-0,90 €"
+    assert logic.euro(3450) == "€34.50"
+    assert logic.euro(-90) == "-€0.90"
 
 
 def test_second_visit_does_not_refill_the_cart(game):

@@ -269,7 +269,7 @@ Each item and product needs a picture (for example `img/kaffeebohnen.png`), used
 - One template for all dialogs: title (place and action), picture, 1-3 short sentences of description, values (price, stock, quantity stepper, subtotal), one green primary button and one secondary button.
 - Entrance zones open a small dialog instead of a toast, so walking past does not spam windows.
 - Texts, pictures and prices come from the product data, not from the pop-up.
-- In-game language: German. Money format in the game: "34,50 €".
+- In-game language: English (since v3). Money format in the game: "€34.50".
 
 ### 10.2 Dialog pop-ups
 

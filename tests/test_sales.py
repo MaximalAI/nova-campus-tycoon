@@ -49,7 +49,7 @@ def test_full_order_credits_money_only_at_handover():
     assert state["tray"] == ["coffee", "pastel_de_nata"]
     state, res = go(state, 8.32, type="handover", shop="cafe", student="s0", player_inside=True)
     assert state["money"] == 5_000 + 90 + 130
-    assert res["correct"] and res["toast"] == "Kunde zufrieden: +2,20 €"
+    assert res["correct"] and res["toast"] == "Happy customer: +€2.20"
     assert state["students"]["s0"]["budget"] == 1_000 - 220
     assert state["students"]["s0"]["status"] == st.WANDERING
     assert state["current_order"] is None
@@ -68,13 +68,13 @@ def test_one_order_at_a_time():
     state = send_student(open_game())
     state = send_student(state, sid="s1", items=("coffee",))
     state, _ = go(state, 8.2, type="accept", shop="cafe", student="s0", player_inside=True)
-    with pytest.raises(GameError, match="schon eine Bestellung"):
+    with pytest.raises(GameError, match="already working on an order"):
         go(state, 8.2, type="accept", shop="cafe", student="s1", player_inside=True)
 
 
 def test_serving_requires_the_player_inside():
     state = send_student(open_game())
-    with pytest.raises(GameError, match="im Laden"):
+    with pytest.raises(GameError, match="inside the café"):
         go(state, 8.2, type="accept", shop="cafe", student="s0", player_inside=False)
 
 
@@ -115,7 +115,7 @@ def test_patience_runs_out():
     state = send_student(open_game())
     state, _ = go(state, 8.2, type="accept", shop="cafe", student="s0", player_inside=True)
     state, res = go(state, 9.0, type="patience_expired", shop="cafe", student="s0")
-    assert res["toast"] == "Kunde ist gegangen"
+    assert res["toast"] == "A customer left"
     assert state["current_order"] is None
     assert state["stats"]["shops"]["cafe"]["lost"] == 1
     assert state["reputation"] == 49
@@ -137,7 +137,7 @@ def test_closing_cancels_order_and_sends_queue_away():
 
 def test_last_customers_toast():
     state, res = go(open_game(), 19.75, type="tick")
-    assert res["toast"] == "Letzte Kunden"
+    assert res["toast"] == "Last customers"
 
 
 def test_no_new_customers_after_last_call():
@@ -155,7 +155,7 @@ def test_cleaning_then_summary():
         go(state, 20.1, type="clean", spot="mirror")
     for spot in ("counter", "coffee_machine", "tables"):
         state, res = go(state, 20.2, type="clean", spot=spot)
-        assert res["toast"] == "Erledigt"
+        assert res["toast"] == "Done"
     state, res = go(state, 20.3, type="clean", spot="floor")
     assert state["day_state"] == logic.DAY_SUMMARY
     assert res["summary"]["day"] == 1

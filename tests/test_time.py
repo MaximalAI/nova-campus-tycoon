@@ -47,15 +47,15 @@ def test_format_time():
 @pytest.mark.parametrize(
     "t, name, target, prob",
     [
-        (6.0, "Nacht", 0, 0.0),
-        (7.75, "Früher Morgen", 3, 0.9),
-        (8.5, "Morgen-Rush", 18, 0.8),
-        (10.0, "Vorlesungen", 6, 0.15),
-        (12.5, "Mittagspause", 25, 0.9),
-        (14.0, "Nachmittagsvorlesungen", 4, 0.15),
-        (16.5, "Später Nachmittag", 10, 0.4),
-        (18.5, "Abend", 2, 0.2),
-        (20.5, "Geschlossen", 0, 0.0),
+        (6.0, "Night", 0, 0.0),
+        (7.75, "Early morning", 3, 0.9),
+        (8.5, "Morning rush", 18, 0.8),
+        (10.0, "Morning lectures", 6, 0.15),
+        (12.5, "Lunch break", 25, 0.9),
+        (14.0, "Afternoon lectures", 4, 0.15),
+        (16.5, "Late afternoon", 10, 0.4),
+        (18.5, "Evening", 2, 0.2),
+        (20.5, "Closed", 0, 0.0),
     ],
 )
 def test_phase_table(t, name, target, prob):
@@ -66,9 +66,9 @@ def test_phase_table(t, name, target, prob):
 
 
 @pytest.mark.parametrize(
-    "t, name", [(7.5, "Früher Morgen"), (8.0, "Morgen-Rush"), (9.0, "Vorlesungen"), (12.0, "Mittagspause"),
-                (13.5, "Nachmittagsvorlesungen"), (16.0, "Später Nachmittag"), (18.0, "Abend"),
-                (20.0, "Geschlossen"), (21.0, "Geschlossen")],
+    "t, name", [(7.5, "Early morning"), (8.0, "Morning rush"), (9.0, "Morning lectures"), (12.0, "Lunch break"),
+                (13.5, "Afternoon lectures"), (16.0, "Late afternoon"), (18.0, "Evening"),
+                (20.0, "Closed"), (21.0, "Closed")],
 )
 def test_phase_boundaries_belong_to_the_next_phase(t, name):
     assert tc.phase_at(t)["name"] == name

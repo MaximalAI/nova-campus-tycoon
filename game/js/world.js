@@ -2,9 +2,9 @@
 // World: campus, buildings, interiors, colliders, interaction points, nav grid
 // ---------------------------------------------------------------------------
 const BUILDINGS = {
-  cafe: { x0: -40, x1: -28, z0: -6, z1: 6, door: { side: "east", a: -1.5, b: 1.5 }, wall: 0xfff1d6, trim: 0x2a9d8f, roof: 0x2e8b57, sign: "DEIN CAFÉ" },
+  cafe: { x0: -40, x1: -28, z0: -6, z1: 6, door: { side: "east", a: -1.5, b: 1.5 }, wall: 0xfff1d6, trim: 0x2a9d8f, roof: 0x2e8b57, sign: "YOUR CAFÉ" },
   rival: { x0: -6, x1: 6, z0: -27, z1: -16, door: { side: "south", a: -1.5, b: 1.5 }, wall: 0xe8eef5, trim: 0x8d99ae, roof: 0xb83a3a, sign: "CAFÉ DA ESQUINA" },
-  wholesale: { x0: 28, x1: 46, z0: -9, z1: 9, door: { side: "west", a: -1.8, b: 1.8 }, wall: 0xdfe6d8, trim: 0x52796f, roof: 0x3a5a40, sign: "GROSSHANDEL" },
+  wholesale: { x0: 28, x1: 46, z0: -9, z1: 9, door: { side: "west", a: -1.8, b: 1.8 }, wall: 0xdfe6d8, trim: 0x52796f, roof: 0x3a5a40, sign: "WHOLESALE" },
 };
 const WALL_H = 2.8;
 
@@ -254,8 +254,8 @@ class World {
     const shelf = this.box(0.6, 1.9, 2.2, 0x6d4c41, -39.5, 0.95, 3.6);
     for (let i = 0; i < 3; i++) this.box(0.5, 0.3, 0.5, [0xa1887f, 0xffb74d, 0x81c784][i], -39.45, 0.55 + i * 0.6, 3.0 + i * 0.5);
     this.collide(-39.85, -39.15, 2.5, 4.7);
-    const planBoard = this.board("TAGESPLAN", -37.4, -5.7, 0, "#2a9d8f");
-    const upBoard = this.board("AUSBAU", -31.5, -5.7, 0, "#e76f51");
+    const planBoard = this.board("DAY PLAN", -37.4, -5.7, 0, "#2a9d8f");
+    const upBoard = this.board("UPGRADES", -31.5, -5.7, 0, "#e76f51");
     // Customer area: two tables with chairs
     const tables = [];
     for (const z of [-3.9, 3.9]) {
@@ -270,21 +270,21 @@ class World {
     floorSpot.rotation.x = -Math.PI / 2; floorSpot.position.set(-31.5, 0.05, 1.6); this.scene.add(floorSpot);
 
     const cafeOpenManual = () => g.isManual("cafe");
-    this.addInteractable({ id: "plan_board", pos: { x: -37.4, z: -4.9 }, meshes: [planBoard], label: () => "Tagesplanung",
+    this.addInteractable({ id: "plan_board", pos: { x: -37.4, z: -4.9 }, radius: 2.7, meshes: [planBoard], label: () => "Plan your day",
       enabled: () => g.view && g.view.shops.cafe.owner === "player", action: () => g.flow.openPlanning() });
-    this.addInteractable({ id: "upgrade_board", pos: { x: -31.5, z: -4.9 }, meshes: [upBoard], label: () => "Ausbau & Personal",
+    this.addInteractable({ id: "upgrade_board", pos: { x: -31.5, z: -4.9 }, radius: 2.7, meshes: [upBoard], label: () => "Upgrades & staff",
       action: () => g.flow.openUpgrades() });
-    this.addInteractable({ id: "storage_cafe", pos: { x: -38.6, z: 3.6 }, meshes: [shelf], label: () => "Waren einräumen",
+    this.addInteractable({ id: "storage_cafe", pos: { x: -38.6, z: 3.6 }, meshes: [shelf], label: () => "Stock the goods",
       enabled: () => g.flow.bagHasItemsFor("cafe"), action: () => g.flow.openStock("cafe") });
-    this.addInteractable({ id: "register_cafe", pos: { x: -35.8, z: -0.6 }, meshes: [register, counter], label: () => g.flow.registerLabel("cafe"),
+    this.addInteractable({ id: "register_cafe", pos: { x: -35.8, z: -0.6 }, meshes: [register, counter], label: () => g.flow.registerLabel(),
       action: () => g.flow.useRegister("cafe") });
-    this.addInteractable({ id: "door_sign", pos: { x: -27.2, z: 2.1 }, meshes: [doorSign], label: () => "Laden öffnen",
+    this.addInteractable({ id: "door_sign", pos: { x: -27.2, z: 2.1 }, meshes: [doorSign], label: () => "Open the café",
       enabled: () => g.view && !g.view.open && !g.view.closed && g.clock.t >= 7, action: () => g.flow.askOpen() });
-    this.addInteractable({ id: "station_cafe_coffee", pos: { x: -38.1, z: -3.6 }, meshes: coffee, label: () => "Kaffee zubereiten",
+    this.addInteractable({ id: "station_cafe_coffee", pos: { x: -38.1, z: -3.6 }, meshes: coffee, label: () => "Make a coffee",
       enabled: cafeOpenManual, action: () => g.flow.openStation("cafe", "coffee") });
-    this.addInteractable({ id: "station_cafe_juice", pos: { x: -38.1, z: -1.6 }, meshes: juicer, label: () => "Orangensaft pressen",
+    this.addInteractable({ id: "station_cafe_juice", pos: { x: -38.1, z: -1.6 }, meshes: juicer, label: () => "Squeeze orange juice",
       enabled: cafeOpenManual, action: () => g.flow.openStation("cafe", "orange_juice") });
-    this.addInteractable({ id: "station_cafe_nata", pos: { x: -38.1, z: 0.6 }, meshes: display, label: () => "Pastel de Nata nehmen",
+    this.addInteractable({ id: "station_cafe_nata", pos: { x: -38.1, z: 0.6 }, meshes: display, label: () => "Take a pastel de nata",
       enabled: cafeOpenManual, action: () => g.flow.openStation("cafe", "pastel_de_nata") });
     // Cleaning spots (only after closing)
     const cleaning = { counter: [counter, { x: -34.2, z: -2.5 }], coffee_machine: [coffee[0], { x: -38.1, z: -3.6 }],
@@ -319,15 +319,15 @@ class World {
     }
     const rivalManual = () => g.isManual("rival");
     const owned = () => g.view && g.view.shops.rival.owner === "player";
-    this.addInteractable({ id: "register_rival", pos: { x: 0.6, z: -21.9 }, meshes: [register], label: () => g.flow.registerLabel("rival"),
+    this.addInteractable({ id: "register_rival", pos: { x: 0.6, z: -21.9 }, meshes: [register], label: () => g.flow.registerLabel(),
       enabled: owned, action: () => g.flow.useRegister("rival") });
-    this.addInteractable({ id: "storage_rival", pos: { x: 4.2, z: -25.5 }, meshes: [shelf], label: () => "Waren einräumen",
+    this.addInteractable({ id: "storage_rival", pos: { x: 4.2, z: -25.5 }, meshes: [shelf], label: () => "Stock the goods",
       enabled: () => owned() && g.flow.bagHasItemsFor("rival"), action: () => g.flow.openStock("rival") });
-    this.addInteractable({ id: "station_rival_coffee", pos: { x: -3.4, z: -25.1 }, meshes: coffee, label: () => "Kaffee zubereiten",
+    this.addInteractable({ id: "station_rival_coffee", pos: { x: -3.4, z: -25.1 }, meshes: coffee, label: () => "Make a coffee",
       enabled: rivalManual, action: () => g.flow.openStation("rival", "coffee") });
-    this.addInteractable({ id: "station_rival_tea", pos: { x: -1.4, z: -25.1 }, meshes: kettle, label: () => "Tee aufgießen",
+    this.addInteractable({ id: "station_rival_tea", pos: { x: -1.4, z: -25.1 }, meshes: kettle, label: () => "Make a tea",
       enabled: rivalManual, action: () => g.flow.openStation("rival", "tea") });
-    this.addInteractable({ id: "station_rival_croissant", pos: { x: 0.6, z: -25.1 }, meshes: display, label: () => "Croissant nehmen",
+    this.addInteractable({ id: "station_rival_croissant", pos: { x: 0.6, z: -25.1 }, meshes: display, label: () => "Take a croissant",
       enabled: rivalManual, action: () => g.flow.openStation("rival", "croissant") });
     this.addInteractable({ id: "counter_front_rival", pos: { x: 0.0, z: -21.9 }, radius: 1.8, meshes: [], priority: 1,
       label: () => g.flow.counterLabel("rival"), enabled: () => g.flow.counterLabel("rival") !== null,
@@ -356,7 +356,7 @@ class World {
     // Checkout with cashier
     const desk = this.box(2.4, 1.0, 0.9, 0x354f52, 32, 0.5, 3.6);
     this.collide(30.8, 33.2, 3.15, 4.05);
-    this.addInteractable({ id: "checkout", pos: { x: 32, z: 2.3 }, meshes: [desk], label: () => "Kasse",
+    this.addInteractable({ id: "checkout", pos: { x: 32, z: 2.3 }, meshes: [desk], label: () => "Checkout",
       action: () => g.flow.openCheckout() });
     this.cashierPos = { x: 32, z: 4.8 };
     // Gate in the door: closed until the player enters via P03, and while unpaid goods are in the cart

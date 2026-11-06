@@ -94,15 +94,21 @@ class Player {
     this.game = game;
     this.figure = new Figure(game.scene, { shirt: 0xf2c94c, pants: 0x2b2d42, hair: 0x3d2b1f, skin: 0xe0ac69 }, { apron: true, cap: 0x2a9d8f });
     this.pos = { x: P.spawn.x, z: P.spawn.z };
-    this.speed = 5.0; // m per real second (not multiplied by game speed)
+    this.vel = { x: 0, z: 0 };
+    this.walkSpeed = 4.6; // m per real second (not multiplied by game speed)
+    this.runSpeed = 8.0;
     this.facing = Math.PI / 2;
     this.figure.place(this.pos);
+    this.figure.group.rotation.y = this.facing;
   }
   teleport(p, facing) {
     this.pos = { x: p.x, z: p.z };
+    this.vel = { x: 0, z: 0 };
     if (facing !== undefined) { this.facing = facing; this.figure.group.rotation.y = facing; }
     this.figure.place(this.pos);
   }
+  // GTA/Minecraft style: WASD relative to the camera, the figure turns smoothly
+  // towards where it walks, with acceleration and braking.
   update(dt, input, camYaw, locked) {
     let mx = 0, mz = 0;
     if (!locked) {
@@ -111,21 +117,35 @@ class Player {
       if (input.left) mx -= 1;
       if (input.right) mx += 1;
     }
-    let stride = 0;
+    let tx = 0, tz = 0;
     if (mx || mz) {
       const len = Math.hypot(mx, mz); mx /= len; mz /= len;
-      // camera-relative: "up" walks away from the camera
       const sin = Math.sin(camYaw), cos = Math.cos(camYaw);
       const wx = mx * cos + mz * sin, wz = -mx * sin + mz * cos;
-      const step = this.speed * dt;
-      const before = { x: this.pos.x, z: this.pos.z };
-      this.pos.x += wx * step; this.pos.z += wz * step;
-      resolveCollisions(this.pos, 0.35, this.game.world.colliders);
-      this.pos.x = clamp(this.pos.x, -64, 64); this.pos.z = clamp(this.pos.z, -64, 64);
-      stride = dist2(before, this.pos);
-      this.facing = Math.atan2(wx, wz);
+      const speed = input.run ? this.runSpeed : this.walkSpeed;
+      tx = wx * speed; tz = wz * speed;
     }
-    this.figure.face(this.facing);
+    const k = 1 - Math.exp(-(tx || tz ? 12 : 16) * dt);
+    this.vel.x += (tx - this.vel.x) * k;
+    this.vel.z += (tz - this.vel.z) * k;
+    const before = { x: this.pos.x, z: this.pos.z };
+    // Sub-steps of at most 0.2 m, so the figure never tunnels through thin walls at low frame rates
+    const travel = Math.hypot(this.vel.x, this.vel.z) * dt;
+    const n = Math.max(1, Math.ceil(travel / 0.2));
+    for (let i = 0; i < n; i++) {
+      this.pos.x += this.vel.x * dt / n; this.pos.z += this.vel.z * dt / n;
+      resolveCollisions(this.pos, 0.35, this.game.world.colliders);
+    }
+    this.pos.x = clamp(this.pos.x, -64, 64); this.pos.z = clamp(this.pos.z, -64, 64);
+    const stride = dist2(before, this.pos);
+    if (Math.hypot(this.vel.x, this.vel.z) > 0.3) {
+      const target = Math.atan2(this.vel.x, this.vel.z);
+      let d = target - this.facing;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      this.facing += d * (1 - Math.exp(-14 * dt));
+    }
+    this.figure.group.rotation.y = this.facing;
     this.figure.place(this.pos);
     this.figure.animate(stride);
   }

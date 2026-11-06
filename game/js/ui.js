@@ -21,7 +21,7 @@ class UI {
     const g = this.game, v = g.view;
     if (!v) return;
     this.$("#clock").textContent = fmtTime(g.clock.t);
-    this.$("#day").textContent = `Tag ${v.day}`;
+    this.$("#day").textContent = `Day ${v.day}`;
     const money = this.$("#money");
     money.textContent = euro(v.money);
     money.classList.toggle("neg", v.money <= 0);
@@ -35,7 +35,7 @@ class UI {
     if (order) {
       tray.classList.remove("hidden");
       const need = order.items.map((p) => g.config.products[p].icon).join(" ");
-      tray.innerHTML = `<span>Bestellung: ${need}</span><span>→ Tablett:</span>` +
+      tray.innerHTML = `<span>Order: ${need}</span><span>→ Tray:</span>` +
         (v.tray.length ? v.tray.map((p) => `<div class="tray-slot">${g.config.products[p].icon}</div>`).join("") : `<div class="tray-slot"></div>`);
     } else tray.classList.add("hidden");
   }
@@ -48,13 +48,13 @@ class UI {
     let stock = "";
     for (const s of Object.keys(v.shops)) {
       if (v.shops[s].owner !== "player") continue;
-      stock += `<h4>Lager ${esc(g.config.shops[s].name)}</h4>`;
+      stock += `<h4>Stock: ${esc(g.config.shops[s].name)}</h4>`;
       const st = v.shops[s].stock;
       stock += Object.keys(st).length ? Object.entries(st).map(([i, e]) =>
-        `<div>${items[i].icon} ${e.units} ${esc(items[i].base_name)}</div>`).join("") : "<div>leer</div>";
+        `<div>${items[i].icon} ${e.units} ${esc(items[i].base_name)}</div>`).join("") : "<div>empty</div>";
     }
-    panel.innerHTML = `<h4>Einkaufszettel</h4>${list(v.shopping_list)}<h4>Warenkorb</h4>${list(v.cart)}` +
-      `<h4>Einkaufstasche</h4>${list(v.bag)}${stock}`;
+    panel.innerHTML = `<h4>Shopping list</h4>${list(v.shopping_list)}<h4>Cart</h4>${list(v.cart)}` +
+      `<h4>Bag</h4>${list(v.bag)}${stock}`;
     panel.classList.remove("hidden");
   }
 
@@ -71,6 +71,7 @@ class UI {
   get dialogOpen() { return !!this.current; }
   showDialog(spec) {
     if (spec.unique && (this.current?.id === spec.id || this.queue.some((q) => q.id === spec.id))) return;
+    this.game.releasePointer(); // dialogs need the mouse cursor
     if (this.current) { if (spec.urgent) this.queue.unshift(spec); else this.queue.push(spec); return; }
     this.current = spec;
     this.renderDialog();

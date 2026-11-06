@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Game: scene, camera, lighting, input, main loop, data from Python
+// Game: scene, third-person camera, lighting, input, minimap, main loop
 // ---------------------------------------------------------------------------
 class Game {
   constructor(root) {
@@ -11,11 +11,14 @@ class Game {
     this.planDay = null;
     this.screen = null;
     this.clock = { t: 5, speed: 1, paused: false, running: false };
-    this.input = { up: false, down: false, left: false, right: false };
+    this.input = { up: false, down: false, left: false, right: false, run: false };
+    // Third-person camera: yaw/pitch from the mouse, distance from the wheel
     this.camYaw = -Math.PI / 2;
-    this.camZoom = 1;
+    this.camPitch = 0.42;
+    this.camDist = 7.5;
     this.camPos = new THREE.Vector3(-34, 10, 0);
     this.camLook = new THREE.Vector3(-24, 0, 0);
+    this.pointerLocked = false;
     this.hudTimer = 0;
     this.highlighted = null;
     this.bridge = new Bridge(this);
@@ -35,7 +38,7 @@ class Game {
     this.renderer = r;
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0xbfe3ff, 70, 190);
-    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 400);
+    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 400);
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x4c7a3a, 0.7);
     this.scene.add(this.hemi);
     this.sun = new THREE.DirectionalLight(0xffffff, 1.4);
@@ -56,6 +59,7 @@ class Game {
     this.staff.rival.place(P.rival.staff); this.staff.rival.group.rotation.y = 0;
     this.staff.cafeManager.place(P.cafe.staff); this.staff.cafeManager.group.rotation.y = Math.PI / 2;
     this.raycaster = new THREE.Raycaster();
+    this.minimap = this.root.querySelector("#minimap-canvas").getContext("2d");
     this.bindInput();
     window.addEventListener("resize", () => {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -85,6 +89,9 @@ class Game {
     setTimeout(cb, 700);
     setTimeout(() => f.classList.remove("on"), 2600);
   }
+  releasePointer() {
+    if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (e) { /* ignore */ } }
+  }
 
   // ------------------------------------------------------------ data from Python
   onData(data) {
@@ -111,7 +118,7 @@ class Game {
       this.planDay = data.plan.day;
       this.startDay(data.plan, data.view, continuing);
     }
-    if (prevView !== this.view && this.ui.current && this.ui.current.refreshOnView !== false && ["P18"].includes(this.ui.current.id)) this.ui.refreshDialog();
+    if (prevView !== this.view && this.ui.current && ["P18"].includes(this.ui.current.id)) this.ui.refreshDialog();
     this.ui.updateHud();
   }
 
@@ -134,11 +141,13 @@ class Game {
 
   // ------------------------------------------------------------------- input
   bindInput() {
-    const keys = { ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down", ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right" };
+    const keys = { ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down", ArrowLeft: "left", KeyA: "left",
+      ArrowRight: "right", KeyD: "right", ShiftLeft: "run", ShiftRight: "run" };
     window.addEventListener("keydown", (e) => {
       if (!this.view && e.code !== "Enter") return;
-      if (keys[e.code]) { this.input[keys[e.code]] = true; e.preventDefault(); }
+      if (keys[e.code]) { this.input[keys[e.code]] = true; if (e.code.startsWith("Arrow")) e.preventDefault(); }
       if (e.code === "Tab") { e.preventDefault(); if (this.view) this.ui.toggleTab(true); }
+      if (e.code === "Space" && this.view) e.preventDefault();
       if (e.repeat) return;
       if (e.code === "Enter") { e.preventDefault(); this.ui.pressPrimary(); }
       if (e.code === "Escape") { e.preventDefault(); if (this.ui.current && !this.ui.current.noEsc) this.ui.pressSecondary(); }
@@ -150,17 +159,36 @@ class Game {
       if (e.code === "Tab") this.ui.toggleTab(false);
     });
     window.addEventListener("blur", () => { for (const k in this.input) this.input[k] = false; });
+
     const canvas = this.renderer.domElement;
     let drag = null;
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("pointerdown", (e) => {
       this.focus();
-      if (e.button === 2) { drag = { x: e.clientX, yaw: this.camYaw }; return; }
-      if (e.button === 0 && !this.ui.dialogOpen && this.view) this.clickAt(e.clientX, e.clientY);
+      if (!this.view || this.ui.dialogOpen) return;
+      if (e.button === 2) { drag = { x: e.clientX, y: e.clientY, yaw: this.camYaw, pitch: this.camPitch }; return; }
+      if (e.button !== 0) return;
+      if (this.pointerLocked) return this.clickAt(window.innerWidth / 2, window.innerHeight / 2); // crosshair
+      if (!this.clickAt(e.clientX, e.clientY)) {
+        // Clicking empty space captures the mouse for looking around (Esc releases it)
+        try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (err) { /* not supported */ }
+      }
     });
-    window.addEventListener("pointermove", (e) => { if (drag) this.camYaw = drag.yaw - (e.clientX - drag.x) * 0.006; });
-    canvas.addEventListener("wheel", (e) => { e.preventDefault(); this.camZoom = clamp(this.camZoom * (e.deltaY > 0 ? 1.1 : 0.9), 0.6, 2.6); }, { passive: false });
+    document.addEventListener("pointerlockchange", () => {
+      this.pointerLocked = document.pointerLockElement === canvas;
+      this.root.querySelector("#crosshair").classList.toggle("hidden", !this.pointerLocked);
+    });
+    window.addEventListener("mousemove", (e) => {
+      if (this.pointerLocked) {
+        this.camYaw -= e.movementX * 0.0028;
+        this.camPitch = clamp(this.camPitch + e.movementY * 0.0022, 0.12, 1.25);
+      } else if (drag) {
+        this.camYaw = drag.yaw - (e.clientX - drag.x) * 0.006;
+        this.camPitch = clamp(drag.pitch + (e.clientY - drag.y) * 0.004, 0.12, 1.25);
+      }
+    });
     window.addEventListener("pointerup", () => { drag = null; });
+    canvas.addEventListener("wheel", (e) => { e.preventDefault(); this.camDist = clamp(this.camDist * (e.deltaY > 0 ? 1.1 : 0.9), 3.5, 22); }, { passive: false });
   }
 
   nearestInteractable() {
@@ -177,6 +205,7 @@ class Game {
 
   interact() { const it = this.nearestInteractable(); if (it) it.action(); }
 
+  // Returns true if the click hit something interactive.
   clickAt(x, y) {
     const mouse = new THREE.Vector2((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1);
     this.raycaster.setFromCamera(mouse, this.camera);
@@ -191,16 +220,18 @@ class Game {
       if (o.userData.interactable) {
         const it = o.userData.interactable;
         if (!it.enabled()) continue;
-        if (dist2(this.player.pos, it.pos) > it.radius + 0.8) return this.ui.toast("Geh näher heran");
-        return it.action();
+        if (dist2(this.player.pos, it.pos) > it.radius + 0.8) { this.ui.toast("Get closer"); return true; }
+        it.action();
+        return true;
       }
       const a = this.flow.agents.get(o.userData.agentId);
       if (a && a.shop && this.flow.queues[a.shop][0] === a.id && this.isManual(a.shop)) {
-        if (!this.flow.playerIn(a.shop) || dist2(this.player.pos, a.pos) > 3.2) return this.ui.toast("Geh näher heran");
-        return this.flow.useCounterFront(a.shop);
+        if (!this.flow.playerIn(a.shop) || dist2(this.player.pos, a.pos) > 3.2) { this.ui.toast("Get closer"); return true; }
+        this.flow.useCounterFront(a.shop);
+        return true;
       }
-      return;
     }
+    return false;
   }
 
   // ------------------------------------------------------------------ lighting
@@ -229,37 +260,45 @@ class Game {
   }
 
   // ------------------------------------------------------------------- camera
+  // Reliable third-person camera: always behind the player, looking at the upper body.
+  // Inside a building it comes closer and looks down more, so the figure is never
+  // hidden behind the counter; walls between camera and player fade out.
   updateCamera(dt) {
     const p = this.player.pos;
-    let pos, look, k = 1 - Math.pow(0.0015, dt);
+    let pos, look;
+    let k = 1 - Math.exp(-10 * dt);
     if (this.screen !== "game") {
       const a = performance.now() / 14000;
       pos = new THREE.Vector3(Math.sin(a) * 52, 30, Math.cos(a) * 52);
       look = new THREE.Vector3(0, 0, -2);
       k = 1;
     } else {
-      const counterShop = ["cafe", "rival"].find((s) => {
-        const z = P[s].counterZone;
-        return this.view && this.view.open && this.view.shops[s].owner === "player" && !this.view.shops[s].auto &&
-          p.x > z.x0 && p.x < z.x1 && p.z > z.z0 && p.z < z.z1;
-      });
-      if (counterShop) {
-        const c = P[counterShop].cam;
-        pos = new THREE.Vector3(c.x, c.y, c.z);
-        look = new THREE.Vector3(c.lx, c.ly, c.lz);
-        this.camYaw = counterShop === "cafe" ? -Math.PI / 2 : Math.PI;
-      } else {
-        const inside = this.world.buildingAt(p);
-        const z = inside ? Math.min(this.camZoom, 1.2) : this.camZoom;
-        const d = (inside ? 4.4 : 7.5) * z, h = (inside ? 4.8 : 5.0) * z;
-        pos = new THREE.Vector3(p.x + Math.sin(this.camYaw) * d, h, p.z + Math.cos(this.camYaw) * d);
-        look = new THREE.Vector3(p.x, 1.2, p.z);
-      }
+      const inside = this.world.buildingAt(p);
+      const dist = inside ? Math.min(this.camDist, 6.2) : this.camDist;
+      const pitch = inside ? Math.max(this.camPitch, 0.75) : this.camPitch;
+      const off = new THREE.Vector3(Math.sin(this.camYaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(this.camYaw) * Math.cos(pitch));
+      look = new THREE.Vector3(p.x, 1.35, p.z);
+      pos = look.clone().addScaledVector(off, dist);
+      pos.y = Math.max(pos.y, 1.2);
     }
     this.camPos.lerp(pos, k);
-    this.camLook.lerp(look, k);
+    this.camLook.lerp(look, 1 - Math.exp(-16 * dt));
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
+  }
+
+  // Which buildings stand between the camera and the player (2D segment vs. rectangle)?
+  occluders() {
+    const out = new Set();
+    const a = { x: this.camera.position.x, z: this.camera.position.z }, b = this.player.pos;
+    for (const [key, r] of Object.entries(BUILDINGS)) {
+      const steps = 24;
+      for (let i = 0; i <= steps; i++) {
+        const x = lerp(a.x, b.x, i / steps), z = lerp(a.z, b.z, i / steps);
+        if (x > r.x0 - 0.3 && x < r.x1 + 0.3 && z > r.z0 - 0.3 && z < r.z1 + 0.3) { out.add(key); break; }
+      }
+    }
+    return out;
   }
 
   // --------------------------------------------------------------------- frame
@@ -280,14 +319,12 @@ class Game {
         dtGameMin = (c.t - before) * 60;
       }
       this.flow.sendTicks();
-      if (this.flow.progress && dtGameMin > 0) {
-        const pr = this.flow.progress;
-        pr.done += dtGameMin;
+      const pr = this.flow.progress;
+      if (pr) {
+        // progress bars run in game minutes; after 21:00 (clock stopped) cleaning still completes
+        const add = dtGameMin > 0 ? dtGameMin : (!c.paused && this.ui.current?.id === "P15" && !c.running ? dt : 0);
+        pr.done += add;
         const bar = pr.bar(); if (bar) bar.style.width = `${clamp(pr.done / pr.minutes, 0, 1) * 100}%`;
-        if (pr.done >= pr.minutes) { this.flow.progress = null; pr.onDone(); }
-      } else if (this.flow.progress && this.ui.current?.id === "P15" && !c.running && !c.paused) {
-        // after 21:00 the clock is stopped; cleaning still completes
-        const pr = this.flow.progress; pr.done += dt; const bar = pr.bar(); if (bar) bar.style.width = `${clamp(pr.done / pr.minutes, 0, 1) * 100}%`;
         if (pr.done >= pr.minutes) { this.flow.progress = null; pr.onDone(); }
       }
       this.player.update(dt, this.input, this.camYaw, this.ui.dialogOpen);
@@ -298,15 +335,26 @@ class Game {
     }
     this.applyLighting(this.screen === "game" ? this.clock.t : 12.5);
     this.updateCamera(dt);
+    if (this.screen === "game" && v) this.updateBuildingFade();
     this.updateLabels();
     this.renderer.render(this.scene, this.camera);
     this.hudTimer += dt;
-    if (this.hudTimer > 0.1 && this.view) { this.hudTimer = 0; this.ui.updateHud(); }
+    if (this.hudTimer > 0.1 && this.view) { this.hudTimer = 0; this.ui.updateHud(); this.drawMinimap(); }
+  }
+
+  updateBuildingFade() {
+    const inside = this.world.buildingAt(this.player.pos);
+    const hide = this.occluders();
+    if (inside) hide.add(inside);
+    for (const [key, parts] of Object.entries(this.world.buildingParts)) {
+      const on = hide.has(key);
+      for (const m of parts.wallMats) { m.opacity = on ? 0.16 : 1; m.depthWrite = !on; }
+      parts.roof.visible = !on;
+    }
   }
 
   updateWorldState(now) {
     const v = this.view, w = this.world;
-    // Highlight the object in range
     const it = this.nearestInteractable();
     if (this.highlighted !== it) {
       if (this.highlighted) for (const m of this.highlighted.meshes) if (m.material?.emissive) m.material.emissive.setHex(0x000000);
@@ -314,17 +362,9 @@ class Game {
       this.highlighted = it;
     }
     this.currentHint = it && !this.ui.dialogOpen ? it : null;
-    // Building walls fade while the player is inside
-    const inside = w.buildingAt(this.player.pos);
-    for (const [key, parts] of Object.entries(w.buildingParts)) {
-      const on = key === inside;
-      for (const m of parts.wallMats) { m.opacity = on ? 0.18 : 1; m.depthWrite = !on; }
-      parts.roof.visible = !on;
-    }
     // Roof colour shows the owner: green = yours, red = competitor
-    const rivalRoof = w.buildingParts.rival.roof.material;
-    rivalRoof.color.setHex(v.shops.rival.owner === "player" ? 0x2e8b57 : BUILDINGS.rival.roof);
-    // Staff
+    w.buildingParts.rival.roof.material.color.setHex(v.shops.rival.owner === "player" ? 0x2e8b57 : BUILDINGS.rival.roof);
+    // Staff behind the counters
     this.staff.rival.visible = v.shops.rival.auto;
     this.staff.cafeManager.visible = v.shops.cafe.manager;
     this.staff.rival.animate(0); this.staff.cafeManager.animate(0); this.staff.cashier.animate(0);
@@ -351,23 +391,74 @@ class Game {
         const e = ui.label("hint", `<div class="hint"><b>E</b>${esc(this.currentHint.label())}</div>`);
         ui.placeLabel(e, new THREE.Vector3(this.currentHint.pos.x, 2.5, this.currentHint.pos.z), this.camera, W, H);
       }
+      const now = performance.now();
       for (const a of this.flow.agents.values()) {
-        if (!a.figure.visible || !["to_shop", "queue", "served"].includes(a.mode)) continue;
-        if (dist2(a.pos, this.player.pos) > 40) continue;
+        if (!a.figure.visible || dist2(a.pos, this.player.pos) > 40) continue;
+        if (a.emote && a.emote.until > now) {
+          const e = ui.label("b" + a.id, `<div class="bubble emote" style="position:relative">${a.emote.icon}</div>`);
+          ui.placeLabel(e, new THREE.Vector3(a.pos.x, 2.15, a.pos.z), this.camera, W, H);
+          continue;
+        }
+        if (!["to_shop", "queue", "served"].includes(a.mode)) continue;
         const items = a.order || a.wanted || [];
         if (!items.length && !(a.soldOut || []).length) continue;
         const icons = items.map((p) => this.config.products[p].icon).join("") +
           (a.soldOut || []).map((p) => `<span class="gone">${this.config.products[p].icon}</span>`).join("");
         let pat = "";
-        if ((a.mode === "queue" || a.mode === "served") && this.view.open) {
+        if (a.mode === "queue" && this.view.open) {
           const f = clamp(a.patience / a.patienceMax, 0, 1);
           pat = `<div class="patience"><div style="width:${f * 100}%;background:${f > 0.5 ? "#2f9e5b" : f > 0.25 ? "#f2c94c" : "#d9534f"}"></div></div>`;
-        }
+        } else if (a.mode === "served") pat = `<div class="serving">being served</div>`;
         const e = ui.label("b" + a.id, `${pat}<div class="bubble" style="position:relative">${icons}</div>`);
         ui.placeLabel(e, new THREE.Vector3(a.pos.x, 2.15, a.pos.z), this.camera, W, H);
       }
     }
     ui.endLabels();
+  }
+
+  // ------------------------------------------------------------------ minimap
+  drawMinimap() {
+    const ctx = this.minimap, S = 200, R = 62;
+    const mx = (x) => (x + R) / (2 * R) * S, my = (z) => (z + R) / (2 * R) * S;
+    ctx.clearRect(0, 0, S, S);
+    ctx.fillStyle = "#79c25a"; ctx.fillRect(0, 0, S, S);
+    ctx.fillStyle = "#efe3c8";
+    const path = (x0, x1, z0, z1) => ctx.fillRect(mx(x0), my(z0), mx(x1) - mx(x0), my(z1) - my(z0));
+    path(-70, 70, -2.2, 2.2); path(-2.2, 2.2, -16, 70);
+    ctx.beginPath(); ctx.arc(mx(0), my(6), 8 / (2 * R) * S, 0, Math.PI * 2); ctx.fill();
+    const v = this.view;
+    const colors = { cafe: "#2e8b57", rival: v.shops.rival.owner === "player" ? "#2e8b57" : "#c0392b", wholesale: "#2c6fbb" };
+    const icons = { cafe: "☕", rival: "🏪", wholesale: "🏬" };
+    for (const [key, b] of Object.entries(BUILDINGS)) {
+      ctx.fillStyle = colors[key];
+      ctx.fillRect(mx(b.x0), my(b.z0), mx(b.x1) - mx(b.x0), my(b.z1) - my(b.z0));
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5;
+      ctx.strokeRect(mx(b.x0), my(b.z0), mx(b.x1) - mx(b.x0), my(b.z1) - my(b.z0));
+      ctx.font = "16px serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(icons[key], mx((b.x0 + b.x1) / 2), my((b.z0 + b.z1) / 2));
+    }
+    ctx.fillStyle = "#3d3d3d";
+    for (const a of this.flow.agents.values()) {
+      if (!a.figure.visible) continue;
+      ctx.beginPath(); ctx.arc(mx(a.pos.x), my(a.pos.z), 2, 0, Math.PI * 2); ctx.fill();
+    }
+    const target = this.flow.objectiveTarget();
+    if (target) {
+      ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(mx(target.x), my(target.z), 6 + Math.sin(performance.now() / 250) * 1.5, 0, Math.PI * 2); ctx.stroke();
+    }
+    // Player arrow (pointing where the figure looks) and the camera's view direction
+    const p = this.player.pos, f = this.player.facing;
+    ctx.save();
+    ctx.translate(mx(p.x), my(p.z));
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    const cy = this.camYaw + Math.PI; // camera looks opposite to its offset
+    ctx.beginPath(); ctx.moveTo(0, 0);
+    ctx.arc(0, 0, 26, Math.atan2(Math.cos(cy), Math.sin(cy)) - 0.5, Math.atan2(Math.cos(cy), Math.sin(cy)) + 0.5); ctx.fill();
+    ctx.rotate(Math.atan2(Math.cos(f), Math.sin(f)) - Math.PI / 2 + Math.PI);
+    ctx.fillStyle = "#ffd166"; ctx.strokeStyle = "#2b2118"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(6, 6); ctx.lineTo(0, 3); ctx.lineTo(-6, 6); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
   }
 }
 

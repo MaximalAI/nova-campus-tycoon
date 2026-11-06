@@ -9,7 +9,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, w) => a + (b - a) * w;
 const euro = (c) => {
   const neg = c < 0; c = Math.abs(Math.round(c));
-  return `${neg ? "-" : ""}${Math.floor(c / 100)},${String(c % 100).padStart(2, "0")} €`;
+  return `${neg ? "-" : ""}€${Math.floor(c / 100)}.${String(c % 100).padStart(2, "0")}`;
 };
 const fmtTime = (t) => {
   const m = Math.floor(t * 60 + 1e-6);
@@ -72,7 +72,7 @@ class Bridge {
     this.inflight = null;
     const byCid = new Map((data.results || []).map((r) => [r.cid, r]));
     for (const ev of done.events) {
-      const r = byCid.get(ev.cid) || { ok: false, error: "Keine Antwort" };
+      const r = byCid.get(ev.cid) || { ok: false, error: "No answer from the game server" };
       const cb = this.callbacks.get(ev.cid);
       this.callbacks.delete(ev.cid);
       if (!r.ok && !cb && r.error) this.game.ui.toast(r.error, true);

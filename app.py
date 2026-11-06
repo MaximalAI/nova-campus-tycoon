@@ -76,7 +76,7 @@ def handle_events() -> None:
         ss.results = [{"cid": e.get("cid"), "ok": True, "result": {}} for e in batch["events"]]
         return
     if ss.game_id is None:
-        ss.results = [{"cid": e.get("cid"), "ok": False, "error": "Kein Spiel geladen."} for e in batch["events"]]
+        ss.results = [{"cid": e.get("cid"), "ok": False, "error": "No game loaded."} for e in batch["events"]]
         return
     state = db.load_game(conn, ss.game_id)
     state, ss.results = bridge.process_batch(state, batch["events"])
@@ -92,6 +92,8 @@ def payload() -> dict:
     state = db.load_game(conn, ss.game_id) if ss.game_id is not None else None
     if state is None:
         ss.game_id = None
+    else:
+        logic.migrate(state)
     return {
         "ack": ss.last_seq,
         "results": ss.results,
