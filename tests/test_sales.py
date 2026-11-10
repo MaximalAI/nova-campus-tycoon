@@ -51,7 +51,7 @@ def test_full_order_credits_money_only_at_handover():
     state, res = go(state, 8.32, type="handover", shop="cafe", student="s0", player_inside=True)
     assert state["money"] == 5_000 + 90 + 130
     assert res["correct"] and res["toast"] == "Happy customer: +€2.20"
-    assert state["students"]["s0"]["budget"] == 1_000 - 220
+    assert state["students"]["s0"]["budget"] == CONFIG["students"]["budget"] - 220
     assert state["students"]["s0"]["status"] == st.WANDERING
     assert state["current_order"] is None
 
@@ -211,6 +211,6 @@ def test_next_day_resets_the_day():
     state, res = go(state, 21.0, type="next_day")
     assert res["new_day"] == 2
     assert state["time"] == 5.0 and state["day_state"] == logic.MORNING_PLANNING
-    assert state["students"]["s0"]["budget"] == 1_000
+    assert state["students"]["s0"]["budget"] == CONFIG["students"]["budget"]
     assert state["stats"]["shops"]["cafe"]["revenue"] == 0
     assert len(state["history"]) == 1

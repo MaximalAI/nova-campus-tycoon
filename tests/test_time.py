@@ -25,8 +25,9 @@ def test_pause_stops_time_at_every_speed():
         assert tc.advance(12.0, 100, speed=speed, paused=True) == 12.0
 
 
-def test_dialogs_pause_clock_only_before_opening():
-    assert tc.advance(6.0, 30, speed=1, dialog_open=True) == 6.0
+def test_dialogs_never_pause_the_clock():
+    # v5: the clock keeps running while a pop-up is open (only the pause menu stops it)
+    assert tc.advance(6.0, 30, speed=1, dialog_open=True) == pytest.approx(6.5)
     assert tc.advance(9.0, 30, speed=1, dialog_open=True) == pytest.approx(9.5)
 
 
@@ -50,11 +51,11 @@ def test_format_time():
         (6.0, "Night", 0, 0.0),
         (7.75, "Early morning", 3, 0.9),
         (8.5, "Morning rush", 18, 0.8),
-        (10.0, "Morning lectures", 6, 0.15),
+        (10.0, "Morning lectures", 12, 0.85),
         (12.5, "Lunch break", 25, 0.9),
-        (14.0, "Afternoon lectures", 4, 0.15),
-        (16.5, "Late afternoon", 10, 0.4),
-        (18.5, "Evening", 2, 0.2),
+        (14.0, "Afternoon lectures", 12, 0.85),
+        (16.5, "Late afternoon", 14, 0.75),
+        (18.5, "Evening", 8, 0.8),
         (20.5, "Closed", 0, 0.0),
     ],
 )

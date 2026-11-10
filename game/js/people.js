@@ -52,10 +52,12 @@ class Figure {
     this.group.rotation.y += d * 0.25;
   }
   animate(stride) {
-    // stride: distance walked this frame (0 = standing)
-    if (stride > 0) this.phase += stride * 3.2;
-    else this.phase *= 0.85;
-    const a = Math.sin(this.phase) * (stride > 0 ? 0.6 : 0.6 * Math.min(1, Math.abs(Math.sin(this.phase))));
+    // stride: distance walked this frame (0 = standing). v5: when standing, the legs swing
+    // out quickly instead of "walking on the spot" for a moment.
+    if (this.swing === undefined) this.swing = 0;
+    if (stride > 0) { this.phase += stride * 3.2; this.swing = Math.min(1, this.swing + 0.3); }
+    else { this.swing *= 0.6; if (this.swing < 0.02) { this.swing = 0; this.phase = 0; } }
+    const a = Math.sin(this.phase) * 0.6 * this.swing;
     this.legL.rotation.x = a; this.legR.rotation.x = -a;
     this.armL.rotation.x = -a * 0.8; this.armR.rotation.x = a * 0.8;
   }
@@ -177,6 +179,7 @@ class StudentAgent {
   }
   get speed() { return this.info.traits.walk_speed; }
   walkTo(points, onArrive) {
+    this.faceTarget = null;
     this.path = points.map((p) => ({ x: p.x, z: p.z }));
     this.onArrive = onArrive || null;
   }
@@ -200,8 +203,73 @@ class StudentAgent {
         stride += budget; budget = 0;
       }
     }
+    if (!this.path.length && this.faceTarget !== undefined && this.faceTarget !== null) this.figure.face(this.faceTarget);
     this.figure.place(this.pos);
     this.figure.animate(stride);
   }
-  faceTo(p) { this.figure.face(Math.atan2(p.x - this.pos.x, p.z - this.pos.z)); }
+  faceTo(p) { this.faceTarget = Math.atan2(p.x - this.pos.x, p.z - this.pos.z); }
+  // standing in a queue: others walk around me
+  anchored() { return !this.path.length && (this.mode === "queue" || this.mode === "served"); }
+}
+
+// v5: staff (manager or the competitor's barista) walk to the stations for each product,
+// back to the counter, and clean the café after closing.
+class StaffAgent extends StudentAgent {
+  constructor(game, shop, colors, opts) {
+    super(game, "staff_" + shop, { name: "Staff", traits: { walk_speed: 2.6, patience: 60, fickleness: 1 },
+      look: { shirt: 0, pants: 0, hair: 0, skin: 0 } });
+    game.scene.remove(this.figure.group);
+    this.figure = new Figure(game.scene, colors, opts);
+    this.shop = shop;
+    this.home = P[shop].staff;
+    this.steps = [];
+    this.reset();
+  }
+  get speed() { return 3.6; }
+  reset() {
+    this.steps = []; this.path = []; this.waitLeft = 0; this.job = null;
+    this.pos = { x: this.home.x, z: this.home.z };
+    this.figure.place(this.pos);
+    this.faceTarget = this.shop === "cafe" ? Math.PI / 2 : Math.PI;
+  }
+  anchored() { return true; }
+  // Behind the counter or in front of it? Crossing sides goes through the gap at the end of the counter.
+  behind(p) { return this.shop === "cafe" ? p.x < -34.9 : p.z < -21.0; }
+  route(from, to) {
+    if (this.behind(from) === this.behind(to)) return [to];
+    const gap = this.shop === "cafe" ? [{ x: -36.2, z: 4.4 }, { x: -33.6, z: 4.4 }] : [{ x: 4.5, z: -22.2 }, { x: 4.5, z: -19.8 }];
+    return this.behind(from) ? [gap[0], gap[1], to] : [gap[1], gap[0], to];
+  }
+  get busy() { return this.steps.length > 0 || this.path.length > 0; }
+  // steps: {walk: point} | {wait: game minutes} | {face: point} | {call: fn}
+  run(steps, job) { this.steps = steps.slice(); this.job = job || null; this.path = []; this.waitLeft = 0; }
+  stop() { this.steps = [{ walk: this.home }, { face: { x: this.home.x + (this.shop === "cafe" ? 5 : 0), z: this.home.z + (this.shop === "cafe" ? 0 : 5) } }]; this.job = null; this.path = []; }
+  tick(dtScaled, dtGameMin) {
+    const v = this.game.view;
+    this.figure.visible = !!(v && this.game.screen === "game" && (v.shops[this.shop].auto ||
+      (this.shop === "cafe" && v.shops.cafe.manager)));
+    if (!this.figure.visible) return;
+    while (this.steps.length && !this.path.length) {
+      const s = this.steps[0];
+      if (s.walk) {
+        if (dist2(this.pos, s.walk) < 0.05) { this.steps.shift(); continue; }
+        this.walkTo(this.route(this.pos, s.walk));
+        this.steps[0] = { arrived: true };
+        break;
+      }
+      if (s.arrived) { this.steps.shift(); continue; }
+      if (s.face) { this.faceTo(s.face); this.steps.shift(); continue; }
+      if (s.wait !== undefined) {
+        if (this.waitLeft <= 0 && !s.started) { this.waitLeft = s.wait; s.started = true; }
+        this.waitLeft -= dtGameMin;
+        dtGameMin = 0;
+        if (this.waitLeft > 0) break;
+        this.steps.shift();
+        continue;
+      }
+      if (s.call) { this.steps.shift(); s.call(); continue; }
+      this.steps.shift();
+    }
+    this.update(dtScaled);
+  }
 }

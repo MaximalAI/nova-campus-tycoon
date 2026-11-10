@@ -26,20 +26,25 @@ uv run pytest
 | Pause | P or the pause button |
 | Game speed | 1x 2x 4x 8x buttons |
 | Start the day early | ⏩ button under the clock (after shopping, before 08:00) |
-| Fix a wrong order | 🗑 Throw away / ✖ Cancel order in the tray bar |
+| Fix a wrong order | ✕ on a tray slot, 🗑 Throw away extras, ✖ Cancel order (tray bar) |
+| Travel | Click the minimap, then a place on the big map |
+| Statistics | Click the day gain next to your cash |
 | New game | Pause (P) → 🔄 New game |
 
 ## How a day works
 1. 05:00 planning board: decide what to sell, the shopping list is created.
 2. Walk to the wholesaler, fill the cart, pay at the checkout.
+2. At the wholesaler take every product from its stand (the shopping list is only a reference), then pay at the checkout.
 3. Back in the café: stock the goods, set prices at the counter, then press ⏩ to jump to 08:00 (or open from 07:00).
 4. 08:00-20:00: accept orders, prepare them at the stations, hand them over. Money comes at handover.
 5. 20:00: clean the four spots, read the daily summary (today, stock, competitor, last days), next day.
+
+Hiring a manager: he starts the next morning, proposes a shopping list and prices (pop-up), buys, serves, walks to the stations and cleans up after closing. With a manager in your café you can buy the competitor; from the next day you work there yourself until you hire a manager there too (victory).
 
 The game is saved after every action. Close the browser whenever you like; "Continue" on the start screen brings you back.
 
 ## Documents
 - Product brief v2 (source of truth): `docs/product-brief-v2.md`
-- Task specs: `specs/v4-improvements.md` (current), `specs/v3-fixes.md`, `specs/v2-campus-game.md`
+- Task specs: `specs/v5-managers-and-polish.md` (current), `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
 - Architecture: `docs/architecture.md`, assumptions: `docs/assumptions.md`
 - Rules for coding agents: `AGENTS.md` (Claude Code reads `CLAUDE.md`, which imports it)

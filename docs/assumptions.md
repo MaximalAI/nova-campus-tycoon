@@ -61,3 +61,21 @@ Decisions that the brief left open or that came up during implementation. Change
 - Pause menu: "New game" (with confirmation) to start over.
 - Storage shelf: was a solid block with boxes stuck inside it. Now an open shelf whose crates show the real stock.
 - Clock edge case: the browser clock is a float, so 20.9999999 now counts as 21:00 (before, the day could get stuck in "closing").
+
+## v5 changes
+- The clock keeps running while a pop-up is open (only the pause menu stops it). Leaving the browser tab opens the pause menu.
+- The dirty floor spot in the café only shows after closing (it was visible from day 1).
+- Minimap: click it for a big map; clicking a place teleports you to its door. Not possible while unpaid goods are in your cart.
+- Wholesaler: the cart starts empty. You take each product at its stand (shopping list as reference, more or less is fine) and pay at the checkout. During the day the list is hidden; only the cart shows.
+- Demand: lectures and the evening have more students and a higher café probability, and students have €16 a day (was €10, the afternoon dried up because budgets were spent). Measured with the simulation: about 8 to 19 customers per hour for both cafés during lectures.
+- The patience bar runs in game time (checked: 4x speed drops 4x faster). The bar in the order pop-up now updates live.
+- The register is only usable before opening (prices are fixed during the day).
+- Camera inside buildings may go lower and further back (walls fade), so you see the door and arriving customers.
+- Order bubbles: emojis centred, bubble as wide as the order (the "being served" tag used to stretch it).
+- People do not overlap: they push each other apart, someone standing in the queue stays put, the player is pushed out. Customers leave along a side lane instead of walking through the queue. Legs stop swinging at once when someone stops.
+- Sold out: the utility model compares the rest of the order with the other café and with keeping the money. That is why some customers still take the other product and some leave. The toast now says why.
+- Tray: each product has its own ✕, and "Throw away extras" removes only what the order does not need.
+- Manager: starts the next day. Every morning he proposes plan and prices (yesterday's sales +20 %, +50 % if sold out, at least 8; price +€0.10 if sold out, -€0.10 if nobody bought). You accept or change it, otherwise he buys at 07:00. He walks to the stations for every product and cleans the four spots after closing. Happy customers of the manager give +1 reputation (before: only losses, so reputation never recovered).
+- Day gain next to the cash (sales + tips - purchases - spending today); click it for statistics with charts over all days (market share, sales and profit, reputation, customers, cash). The daily summary has a Charts tab too.
+- Price boards in front of both cafés ("-" until today's prices are set or the café opens); a "FOR SALE" sign at the competitor once you hired a manager.
+- After buying the competitor: no barista any more. It opens the next day and you run it yourself (plan, shop, serve) while the manager runs the first café; the day starts in front of the new shop. A manager there too means victory. Old saves with the v3/v4 barista are migrated to this rule.

@@ -52,12 +52,13 @@ class Game {
     this.flow = new Flow(this);
     this.staff = {
       cashier: new Figure(this.scene, { shirt: 0x52796f, pants: 0x2b2d42, hair: 0x111111, skin: 0xc68642 }, { apron: true }),
-      rival: new Figure(this.scene, { shirt: 0xb83a3a, pants: 0x22223b, hair: 0x5a3825, skin: 0xf1c27d }, { apron: true }),
-      cafeManager: new Figure(this.scene, { shirt: 0x2a9d8f, pants: 0x22223b, hair: 0xd4a017, skin: 0xffdbac }, { apron: true, cap: 0x264653 }),
     };
     this.staff.cashier.place(this.world.cashierPos); this.staff.cashier.group.rotation.y = Math.PI;
-    this.staff.rival.place(P.rival.staff); this.staff.rival.group.rotation.y = 0;
-    this.staff.cafeManager.place(P.cafe.staff); this.staff.cafeManager.group.rotation.y = Math.PI / 2;
+    // v5: staff behind the counters walk to the stations and clean up (StaffAgent in people.js)
+    this.workers = {
+      cafe: new StaffAgent(this, "cafe", { shirt: 0x2a9d8f, pants: 0x22223b, hair: 0xd4a017, skin: 0xffdbac }, { apron: true, cap: 0x264653 }),
+      rival: new StaffAgent(this, "rival", { shirt: 0xb83a3a, pants: 0x22223b, hair: 0x5a3825, skin: 0xf1c27d }, { apron: true }),
+    };
     this.raycaster = new THREE.Raycaster();
     this.minimap = this.root.querySelector("#minimap-canvas").getContext("2d");
     this.bindInput();
@@ -74,6 +75,59 @@ class Game {
   }
 
   focus() { try { this.root.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+
+  autoPause() {
+    for (const k in this.input) this.input[k] = false;
+    if (this.ui.current?.id === "P20") return;
+    if (this.ui.dialogOpen) {
+      // keep the open pop-up, show the pause menu right after it
+      this.clock.paused = true;
+      if (!this.ui.queue.some((d) => d.id === "P20")) this.ui.queue.unshift(this.flow.pauseDialog());
+      return;
+    }
+    this.flow.openPause();
+  }
+
+  // ---------------------------------------------------------------- big map
+  openBigMap() {
+    if (!this.view || this.screen !== "game") return;
+    const box = this.root.querySelector("#bigmap");
+    box.classList.remove("hidden");
+    this.releasePointer();
+    this.drawMap(this.root.querySelector("#bigmap-canvas").getContext("2d"), 560, 50, false);
+    const spots = this.root.querySelector("#bigmap-spots");
+    const R = 50, pct = (c) => `${((c + R) / (2 * R)) * 100}%`;
+    const v = this.view;
+    const places = [
+      { key: "cafe", label: "☕ Your café", color: "#2e8b57", at: { x: -34, z: 9 } },
+      { key: "rival", label: v.shops.rival.owner === "player" ? "🏪 Café da Esquina (yours)" : "🏪 Competitor", color: v.shops.rival.owner === "player" ? "#2e8b57" : "#c0392b", at: { x: 0, z: -31 } },
+      { key: "wholesale", label: "🏬 Wholesaler", color: "#2c6fbb", at: { x: 37, z: 12.5 } },
+    ];
+    const block = this.teleportBlock();
+    spots.innerHTML = places.map((p) => `<div class="map-spot ${block ? "off" : ""}" data-go="${p.key}" style="left:${pct(p.at.x)};top:${pct(p.at.z)};background:${p.color}" title="${block || "Go there"}">${p.label}</div>`).join("");
+  }
+  closeBigMap() { this.root.querySelector("#bigmap").classList.add("hidden"); }
+  teleportBlock() {
+    if (this.ui.dialogOpen) return "Close the pop-up first";
+    if (this.world.buildingAt(this.player.pos) === "wholesale" && Object.keys(this.view.cart).length) return "Pay for your cart first";
+    return "";
+  }
+  teleportTo(key) {
+    const block = this.teleportBlock();
+    if (block) { this.ui.toast(block, true); return; }
+    const at = { cafe: P.cafe.spawn, rival: P.rival.spawn, wholesale: { x: 23.6, z: 0 } }[key];
+    if (this.world.buildingAt(this.player.pos) === "wholesale") this.flow.leftWholesaleByMap();
+    this.player.teleport(at, key === "rival" ? Math.PI : key === "wholesale" ? Math.PI / 2 : -Math.PI / 2);
+    this.camYaw = key === "rival" ? 0 : key === "wholesale" ? -Math.PI / 2 : Math.PI / 2;
+    this.flow.zoneFlags = {};
+    this.closeBigMap();
+    this.fadeQuick();
+  }
+  fadeQuick() {
+    const f = this.root.querySelector("#fade");
+    f.classList.add("on");
+    setTimeout(() => f.classList.remove("on"), 250);
+  }
   isManual(shop) {
     const v = this.view;
     return !!(v && v.open && v.shops[shop].owner === "player" && !v.shops[shop].auto);
@@ -130,8 +184,11 @@ class Game {
     this.clock.paused = false;
     this.ui.showHud(true);
     if (this.ui.current && this.ui.current.id === "P00") this.ui.closeDialog();
-    this.player.teleport(P.spawn, Math.PI / 2);
-    this.camYaw = -Math.PI / 2;
+    // v5: the day starts in front of the shop you run yourself
+    const home = view.work_shop === "rival" ? "rival" : "cafe";
+    this.player.teleport(P[home].spawn, home === "rival" ? Math.PI : Math.PI / 2);
+    this.camYaw = home === "rival" ? 0 : -Math.PI / 2;
+    for (const w of Object.values(this.workers)) w.reset();
     this.root.querySelector("#fade").classList.remove("on");
     if (continuing) { this.flow.wholesaleAllowed = false; this.bridge.send("resume", {}, () => {}); }
     if (view.status !== "running") return this.flow.openEnd();
@@ -164,6 +221,10 @@ class Game {
       if (e.code === "Tab") this.ui.toggleTab(false);
     });
     window.addEventListener("blur", () => { for (const k in this.input) this.input[k] = false; });
+    // v5: leaving the browser tab pauses the game
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden && this.screen === "game" && this.view && this.view.status === "running") this.autoPause();
+    });
 
     const canvas = this.renderer.domElement;
     let drag = null;
@@ -305,8 +366,10 @@ class Game {
       k = 1;
     } else {
       const inside = this.world.buildingAt(p);
-      const dist = inside ? Math.min(this.camDist, 6.2) : this.camDist;
-      const pitch = inside ? Math.max(this.camPitch, 0.75) : this.camPitch;
+      // v5: inside a building the camera may go lower and further back (walls fade out),
+      // so you see the door and the customers walking up from behind the counter
+      const dist = inside ? Math.min(this.camDist, 9.5) : this.camDist;
+      const pitch = inside ? Math.max(this.camPitch, 0.3) : this.camPitch;
       const off = new THREE.Vector3(Math.sin(this.camYaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(this.camYaw) * Math.cos(pitch));
       look = new THREE.Vector3(p.x, 1.35, p.z);
       pos = look.clone().addScaledVector(off, dist);
@@ -364,6 +427,8 @@ class Game {
       this.flow.updateGate();
       this.flow.updateZones();
       this.flow.updateStudents(dt, dtGameMin);
+      for (const wk of Object.values(this.workers)) wk.tick(dt * (c.running ? c.speed : 0), dtGameMin);
+      this.separatePeople();
       this.updateWorldState(now);
     }
     this.applyLighting(this.screen === "game" ? this.clock.t : 12.5);
@@ -399,10 +464,9 @@ class Game {
     w.updateShelves(v);
     // Roof colour shows the owner: green = yours, red = competitor
     w.buildingParts.rival.roof.material.color.setHex(v.shops.rival.owner === "player" ? 0x2e8b57 : BUILDINGS.rival.roof);
-    // Staff behind the counters
-    this.staff.rival.visible = v.shops.rival.auto;
-    this.staff.cafeManager.visible = v.shops.cafe.manager;
-    this.staff.rival.animate(0); this.staff.cafeManager.animate(0); this.staff.cashier.animate(0);
+    w.floorSpot.visible = v.day_state === "CLOSING" && !v.cleaning.floor;
+    w.updatePriceBoards(v);
+    this.staff.cashier.animate(0);
     // Objective marker
     const target = this.flow.objectiveTarget();
     const ring = w.markers.ring, arrow = w.markers.arrow;
@@ -444,22 +508,55 @@ class Game {
           const f = clamp(a.patience / a.patienceMax, 0, 1);
           pat = `<div class="patience"><div style="width:${f * 100}%;background:${f > 0.5 ? "#2f9e5b" : f > 0.25 ? "#f2c94c" : "#d9534f"}"></div></div>`;
         } else if (a.mode === "served") pat = `<div class="serving">being served</div>`;
-        const e = ui.label("b" + a.id, `${pat}<div class="bubble" style="position:relative">${icons}</div>`);
+        const n = items.length + (a.soldOut || []).length;
+        const e = ui.label("b" + a.id, `<div class="stack">${pat}<div class="bubble n${Math.min(3, n)}" style="position:relative">${icons}</div></div>`);
         ui.placeLabel(e, new THREE.Vector3(a.pos.x, 2.15, a.pos.z), this.camera, W, H);
       }
     }
     ui.endLabels();
   }
 
+  // Nobody walks through anybody: people push each other apart, the player is pushed out of them.
+  separatePeople() {
+    const list = [...this.flow.agents.values()].filter((a) => a.figure.visible);
+    for (const wk of Object.values(this.workers)) if (wk.figure.visible) list.push(wk);
+    const R = 0.62;
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
+        const d = Math.hypot(dx, dz);
+        if (d >= R || d < 1e-4) continue;
+        const push = (R - d) / 2, nx = dx / d, nz = dz / d;
+        // somebody standing in the queue or at work stays put; the one walking steps aside
+        const aFix = a.anchored && a.anchored(), bFix = b.anchored && b.anchored();
+        const wa = aFix ? 0 : bFix ? 1 : 0.5, wb = bFix ? 0 : aFix ? 1 : 0.5;
+        a.pos.x -= nx * push * 2 * wa; a.pos.z -= nz * push * 2 * wa;
+        b.pos.x += nx * push * 2 * wb; b.pos.z += nz * push * 2 * wb;
+        this.world.keepOutOfWalls(a.pos, 0.3); this.world.keepOutOfWalls(b.pos, 0.3);
+        a.figure.place(a.pos); b.figure.place(b.pos);
+      }
+    }
+    const p = this.player.pos;
+    for (const a of list) {
+      const dx = p.x - a.pos.x, dz = p.z - a.pos.z, d = Math.hypot(dx, dz);
+      if (d < 0.6 && d > 1e-4) { p.x = a.pos.x + (dx / d) * 0.6; p.z = a.pos.z + (dz / d) * 0.6; }
+    }
+    this.world.keepOutOfWalls(p, 0.35);
+  }
+
   // ------------------------------------------------------------------ minimap
-  drawMinimap() {
-    const ctx = this.minimap, S = 200, R = 62;
+  drawMinimap() { this.drawMap(this.minimap, 200, 62, true); }
+
+  // Shared by the minimap (small, centred on the campus) and the big map (clickable places).
+  drawMap(ctx, S, R, small) {
     const mx = (x) => (x + R) / (2 * R) * S, my = (z) => (z + R) / (2 * R) * S;
+    const k = S / 200;
     ctx.clearRect(0, 0, S, S);
     ctx.fillStyle = "#79c25a"; ctx.fillRect(0, 0, S, S);
     ctx.fillStyle = "#efe3c8";
     const path = (x0, x1, z0, z1) => ctx.fillRect(mx(x0), my(z0), mx(x1) - mx(x0), my(z1) - my(z0));
-    path(-70, 70, -2.2, 2.2); path(-2.2, 2.2, -16, 70);
+    path(-80, 80, -2.2, 2.2); path(-2.2, 2.2, -16, 80);
     ctx.beginPath(); ctx.arc(mx(0), my(6), 8 / (2 * R) * S, 0, Math.PI * 2); ctx.fill();
     const v = this.view;
     const colors = { cafe: "#2e8b57", rival: v.shops.rival.owner === "player" ? "#2e8b57" : "#c0392b", wholesale: "#2c6fbb" };
@@ -467,25 +564,26 @@ class Game {
     for (const [key, b] of Object.entries(BUILDINGS)) {
       ctx.fillStyle = colors[key];
       ctx.fillRect(mx(b.x0), my(b.z0), mx(b.x1) - mx(b.x0), my(b.z1) - my(b.z0));
-      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5 * k;
       ctx.strokeRect(mx(b.x0), my(b.z0), mx(b.x1) - mx(b.x0), my(b.z1) - my(b.z0));
-      ctx.font = "16px serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = `${small ? 16 : 30}px serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(icons[key], mx((b.x0 + b.x1) / 2), my((b.z0 + b.z1) / 2));
     }
     ctx.fillStyle = "#3d3d3d";
     for (const a of this.flow.agents.values()) {
       if (!a.figure.visible) continue;
-      ctx.beginPath(); ctx.arc(mx(a.pos.x), my(a.pos.z), 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(mx(a.pos.x), my(a.pos.z), 2 * k, 0, Math.PI * 2); ctx.fill();
     }
     const target = this.flow.objectiveTarget();
     if (target) {
-      ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(mx(target.x), my(target.z), 6 + Math.sin(performance.now() / 250) * 1.5, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "#ffd166"; ctx.lineWidth = 3 * k;
+      ctx.beginPath(); ctx.arc(mx(target.x), my(target.z), (6 + Math.sin(performance.now() / 250) * 1.5) * k, 0, Math.PI * 2); ctx.stroke();
     }
     // Player arrow (pointing where the figure looks) and the camera's view direction
     const p = this.player.pos, f = this.player.facing;
     ctx.save();
     ctx.translate(mx(p.x), my(p.z));
+    ctx.scale(k, k);
     ctx.fillStyle = "rgba(255,255,255,0.25)";
     const cy = this.camYaw + Math.PI; // camera looks opposite to its offset
     ctx.beginPath(); ctx.moveTo(0, 0);

@@ -10,10 +10,11 @@ def test_batch_runs_in_order_and_reports_errors():
         {"cid": 1, "type": "confirm_plan", "plan": {"coffee": 10}, "t": 5.1},
         {"cid": 2, "type": "pay", "t": 5.2},  # not in the wholesaler yet
         {"cid": 3, "type": "enter_wholesaler", "t": 5.6},
-        {"cid": 4, "type": "pay", "t": 5.7},
+        {"cid": 4, "type": "set_cart_item", "item": "coffee_beans", "qty": 1, "t": 5.65},
+        {"cid": 5, "type": "pay", "t": 5.7},
     ]
     new, results = bridge.process_batch(state, events)
-    assert [r["ok"] for r in results] == [True, False, True, True]
+    assert [r["ok"] for r in results] == [True, False, True, True, True]
     assert results[1]["error"] == "You are not inside the wholesaler."
     assert new["bag"] == {"coffee_beans": 1}
     assert new["money"] == 5_000 - 400

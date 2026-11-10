@@ -18,6 +18,9 @@ const P = {
     counterZone: { x0: -39.8, x1: -35.3, z0: -5.8, z1: 5.8 },
     cam: { x: -39.4, y: 4.6, z: 0, lx: -30, ly: 0.6, lz: 0 },
     staff: { x: -36.4, z: -0.6 },
+    register: { x: -35.8, z: -0.6 }, storage: { x: -38.6, z: 3.6 }, serve: { x: -36.4, z: 0 }, spawn: { x: -24.5, z: 0 },
+    // customers leave along a side lane, so they do not walk through the queue behind them
+    exit: [{ x: -34.0, z: 1.25 }, { x: -29.4, z: 1.1 }, { x: -26.4, z: 1.4 }],
   },
   rival: {
     doorOut: { x: 0, z: -14.4 }, doorIn: { x: 0, z: -17.4 },
@@ -26,6 +29,8 @@ const P = {
     counterZone: { x0: -5.8, x1: 5.8, z0: -26.8, z1: -21.3 },
     cam: { x: 0, y: 4.6, z: -26.4, lx: 0, ly: 0.6, lz: -16 },
     staff: { x: 0.6, z: -22.4 },
+    register: { x: 0.6, z: -21.9 }, storage: { x: 4.2, z: -25.5 }, serve: { x: 0, z: -22.4 }, spawn: { x: 2.6, z: -11.5 },
+    exit: [{ x: -1.25, z: -20.0 }, { x: -1.1, z: -17.4 }, { x: -1.4, z: -14.2 }],
   },
   wholesale: { doorOut: { x: 25.6, z: 0 }, doorIn: { x: 29.4, z: 0 } },
 };
@@ -108,6 +113,7 @@ class World {
     this.buildCafeInterior();
     this.buildRivalInterior();
     this.buildWholesaleInterior();
+    this.buildPriceBoards();
 
     // Trees, benches and street lamps
     const trees = [[-18, 12], [-12, -12], [12, -12], [16, 13], [-48, 14], [-50, -16], [52, 16], [54, -18],
@@ -312,16 +318,19 @@ class World {
     const doorSign = this.box(0.08, 0.6, 0.9, 0xffffff, -27.75, 1.6, 2.1);
     const floorSpot = new THREE.Mesh(new THREE.CircleGeometry(0.6, 24), new THREE.MeshLambertMaterial({ color: 0xb08968, emissive: 0x000000 }));
     floorSpot.rotation.x = -Math.PI / 2; floorSpot.position.set(-31.5, 0.05, 1.6); this.scene.add(floorSpot);
+    floorSpot.visible = false; // only dirty after closing (see updateWorldState)
+    this.floorSpot = floorSpot;
 
     const cafeOpenManual = () => g.isManual("cafe");
-    this.addInteractable({ id: "plan_board", pos: { x: -37.4, z: -4.9 }, radius: 2.7, meshes: [planBoard], label: () => "Plan your day",
-      enabled: () => g.view && g.view.shops.cafe.owner === "player", action: () => g.flow.openPlanning() });
+    this.addInteractable({ id: "plan_board", pos: { x: -37.4, z: -4.9 }, radius: 2.7, meshes: [planBoard], label: () => g.flow.planBoardLabel("cafe"),
+      enabled: () => g.flow.planBoardLabel("cafe") !== null, action: () => g.flow.usePlanBoard("cafe") });
     this.addInteractable({ id: "upgrade_board", pos: { x: -31.5, z: -4.9 }, radius: 2.7, meshes: [upBoard], label: () => "Upgrades & staff",
       action: () => g.flow.openUpgrades() });
     this.addInteractable({ id: "storage_cafe", pos: { x: -38.6, z: 3.6 }, meshes: shelf, label: () => "Stock the goods",
       enabled: () => g.flow.bagHasItemsFor("cafe"), action: () => g.flow.openStock("cafe") });
+    // v5: only before opening (prices cannot change during the day)
     this.addInteractable({ id: "register_cafe", pos: { x: -35.8, z: -0.6 }, meshes: [register, counter], label: () => g.flow.registerLabel(),
-      action: () => g.flow.useRegister("cafe") });
+      enabled: () => g.flow.canSetPrices("cafe"), action: () => g.flow.useRegister("cafe") });
     this.addInteractable({ id: "door_sign", pos: { x: -27.2, z: 2.1 }, meshes: [doorSign], label: () => "Open the café",
       enabled: () => g.view && !g.view.open && !g.view.closed && g.clock.t >= 7, action: () => g.flow.askOpen() });
     this.addInteractable({ id: "station_cafe_coffee", pos: { x: -38.1, z: -3.6 }, meshes: coffee, label: () => "Make a coffee",
@@ -364,7 +373,14 @@ class World {
     const rivalManual = () => g.isManual("rival");
     const owned = () => g.view && g.view.shops.rival.owner === "player";
     this.addInteractable({ id: "register_rival", pos: { x: 0.6, z: -21.9 }, meshes: [register], label: () => g.flow.registerLabel(),
-      enabled: owned, action: () => g.flow.useRegister("rival") });
+      enabled: () => g.flow.canSetPrices("rival"), action: () => g.flow.useRegister("rival") });
+    // v5: boards for planning and upgrades also in the second café
+    const rPlan = this.board("DAY PLAN", 5.92, -18.6, -Math.PI / 2, "#2a9d8f");
+    const rUp = this.board("UPGRADES", -5.92, -18.6, Math.PI / 2, "#e76f51");
+    this.addInteractable({ id: "plan_board_rival", pos: { x: 5.0, z: -18.6 }, radius: 2.4, meshes: [rPlan], label: () => g.flow.planBoardLabel("rival"),
+      enabled: () => owned() && g.flow.planBoardLabel("rival") !== null, action: () => g.flow.usePlanBoard("rival") });
+    this.addInteractable({ id: "upgrade_board_rival", pos: { x: -5.0, z: -18.6 }, radius: 2.4, meshes: [rUp], label: () => "Upgrades & staff",
+      enabled: owned, action: () => g.flow.openUpgrades() });
     this.addInteractable({ id: "storage_rival", pos: { x: 4.2, z: -25.5 }, meshes: shelf, label: () => "Stock the goods",
       enabled: () => owned() && g.flow.bagHasItemsFor("rival"), action: () => g.flow.openStock("rival") });
     this.addInteractable({ id: "station_rival_coffee", pos: { x: -3.4, z: -25.1 }, meshes: coffee, label: () => "Make a coffee",
@@ -377,6 +393,68 @@ class World {
       label: () => g.flow.counterLabel("rival"), enabled: () => g.flow.counterLabel("rival") !== null,
       action: () => g.flow.useCounterFront("rival") });
   }
+
+  // v5: a price board in front of each café ("-" until today's prices are set),
+  // and a "FOR SALE" sign at the competitor once you could buy it.
+  buildPriceBoards() {
+    this.priceBoards = {};
+    const make = (shop, x, z, rotY) => {
+      const c = document.createElement("canvas"); c.width = 512; c.height = 640;
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+      const group = new THREE.Group(); group.position.set(x, 0, z); group.rotation.y = rotY;
+      const face = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.25, 0.06), [
+        this.mat(0x3e2723), this.mat(0x3e2723), this.mat(0x3e2723), this.mat(0x3e2723),
+        new THREE.MeshLambertMaterial({ map: tex, emissive: 0x000000 }), this.mat(0x3e2723)]);
+      face.position.set(0, 1.05, 0); face.rotation.x = -0.12; face.castShadow = true;
+      group.add(face);
+      for (const sx of [-0.42, 0.42]) this.box(0.06, 0.5, 0.06, 0x3e2723, sx, 0.25, -0.05, { parent: group });
+      this.scene.add(group);
+      this.collide(x - 0.55, x + 0.55, z - 0.4, z + 0.4);
+      this.priceBoards[shop] = { canvas: c, tex, key: "" };
+    };
+    make("cafe", -25.6, -2.9, Math.PI / 2);
+    make("rival", 3.6, -14.4, 0);
+    // FOR SALE sign next to the competitor's door
+    const sale = new THREE.Group(); sale.position.set(-3.7, 0, -14.6);
+    this.box(0.1, 1.9, 0.1, 0x5d4037, 0, 0.95, 0, { parent: sale });
+    const tex = this.textTexture("FOR SALE", "#c0392b", "#ffffff", 512, 200, 96);
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.55, 0.05), [
+      this.mat(0xffffff), this.mat(0xffffff), this.mat(0xffffff), this.mat(0xffffff),
+      new THREE.MeshLambertMaterial({ map: tex, emissive: 0x000000 }), new THREE.MeshLambertMaterial({ map: tex, emissive: 0x000000 })]);
+    plate.position.set(0.55, 1.55, 0); plate.castShadow = true; sale.add(plate);
+    sale.visible = false;
+    this.scene.add(sale);
+    this.forSale = sale;
+  }
+  updatePriceBoards(view) {
+    const cfg = this.game.config;
+    for (const [shop, b] of Object.entries(this.priceBoards || {})) {
+      const s = view.shops[shop];
+      const known = s.prices_set || s.owner === "bot";
+      const key = JSON.stringify([s.prices, known, s.operating, s.owner]);
+      if (key === b.key) continue;
+      b.key = key;
+      const g = b.canvas.getContext("2d"), W = b.canvas.width, H = b.canvas.height;
+      g.fillStyle = "#26302b"; g.fillRect(0, 0, W, H);
+      g.strokeStyle = "#c9a227"; g.lineWidth = 14; g.strokeRect(10, 10, W - 20, H - 20);
+      g.fillStyle = "#f4e9c9"; g.textAlign = "center"; g.textBaseline = "middle";
+      g.font = "900 54px sans-serif"; g.fillText(cfg.shops[shop].name.toUpperCase(), W / 2, 74);
+      const prods = cfg.shops[shop].products;
+      prods.forEach((p, i) => {
+        const y = 190 + i * 130;
+        g.textAlign = "left"; g.font = "60px serif"; g.fillText(cfg.products[p].icon, 44, y);
+        g.font = "800 38px sans-serif"; g.fillText(cfg.products[p].name.split(" (")[0], 118, y, W - 118 - 190);
+        g.textAlign = "right"; g.font = "900 52px sans-serif"; g.fillStyle = known ? "#ffd166" : "#9aa59f";
+        g.fillText(known ? euro(s.prices[p]) : "-", W - 36, y, 160);
+        g.fillStyle = "#f4e9c9";
+      });
+      if (!s.operating) { g.textAlign = "center"; g.font = "900 46px sans-serif"; g.fillStyle = "#ff8a80"; g.fillText("CLOSED TODAY", W / 2, H - 50); }
+      b.tex.needsUpdate = true;
+    }
+    if (this.forSale) this.forSale.visible = !!view.can_buy_competitor;
+  }
+
+  keepOutOfWalls(pos, radius) { resolveCollisions(pos, radius, this.colliders); }
 
   buildWholesaleInterior() {
     const g = this.game;

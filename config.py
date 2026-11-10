@@ -14,8 +14,10 @@ CONFIG = {
         "day_end": 21.0,
         "real_seconds_per_game_hour": 60,
         "speeds": [1, 2, 4, 8],
-        # Before this hour the clock pauses while a dialog is open.
-        "dialogs_pause_clock_before": 8.0,
+        # Before this hour the clock pauses while a dialog is open (v5: never, the clock keeps running).
+        "dialogs_pause_clock_before": 5.0,
+        # A manager buys the goods he proposed at this time if you did not confirm the proposal.
+        "manager_buys_at": 7.0,
         "earliest_manual_open": 7.0,
         "fast_service_minutes": 12,
     },
@@ -24,7 +26,7 @@ CONFIG = {
     "start_plan": {"coffee": 20, "orange_juice": 4, "pastel_de_nata": 10},
     "students": {
         "pool_size": 25,
-        "budget": 1_000,
+        "budget": 1_600,
         "utility_min": 30,
         "utility_max": 300,
         "patience_minutes": [30, 60],
@@ -48,6 +50,7 @@ CONFIG = {
         "patience_range": [0.75, 1.35],  # patience multiplier at reputation 0 and 100
         "tips": [[60, 0.05], [75, 0.10], [90, 0.15]],  # from this reputation on: share of the bill
         "correct_order": 2,
+        "staff_served": 1,  # a happy customer served by your manager
         "fast_bonus": 1,
         "wrong_order": -4,
         "customer_lost": -3,  # waited too long and left
@@ -61,11 +64,12 @@ CONFIG = {
         {"name": "Night", "from": 5.0, "to": 7.5, "target": 0, "cafe_probability": 0.0},
         {"name": "Early morning", "from": 7.5, "to": 8.0, "target": 3, "cafe_probability": 0.9},
         {"name": "Morning rush", "from": 8.0, "to": 9.0, "target": 18, "cafe_probability": 0.8},
-        {"name": "Morning lectures", "from": 9.0, "to": 12.0, "target": 6, "cafe_probability": 0.15},
+        # v5: a few students also come during lectures, so there is never a long empty wait
+        {"name": "Morning lectures", "from": 9.0, "to": 12.0, "target": 12, "cafe_probability": 0.85},
         {"name": "Lunch break", "from": 12.0, "to": 13.5, "target": 25, "cafe_probability": 0.9},
-        {"name": "Afternoon lectures", "from": 13.5, "to": 16.0, "target": 4, "cafe_probability": 0.15},
-        {"name": "Late afternoon", "from": 16.0, "to": 18.0, "target": 10, "cafe_probability": 0.4},
-        {"name": "Evening", "from": 18.0, "to": 20.0, "target": 2, "cafe_probability": 0.2},
+        {"name": "Afternoon lectures", "from": 13.5, "to": 16.0, "target": 12, "cafe_probability": 0.85},
+        {"name": "Late afternoon", "from": 16.0, "to": 18.0, "target": 14, "cafe_probability": 0.75},
+        {"name": "Evening", "from": 18.0, "to": 20.0, "target": 8, "cafe_probability": 0.8},
         {"name": "Closed", "from": 20.0, "to": 21.0, "target": 0, "cafe_probability": 0.0},
     ],
     # Lighting keyframes; values in between are interpolated smoothly.
@@ -154,7 +158,8 @@ CONFIG = {
     "manager_cost": 10_000,
     # After you buy the competitor, its barista keeps selling automatically and
     # orders supplies every morning (and right after the purchase) for this plan.
-    "rival_restock_plan": {"coffee": 20, "tea": 15, "croissant": 15},
+    # Manager proposals (v5): yesterday's sales plus a buffer, at least this many portions.
+    "manager": {"buffer": 1.2, "sold_out_buffer": 1.5, "min_portions": 8},
     "acquisition_cost": 30_000,
     "cleaning_spots": {
         "counter": {"name": "Wipe the counter", "minutes": 3},

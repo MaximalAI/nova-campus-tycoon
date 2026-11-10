@@ -6,6 +6,7 @@ import logic
 import simulation as sim
 import students as st
 import timeclock as tc
+from config import CONFIG
 
 
 @pytest.fixture
@@ -17,7 +18,7 @@ def test_pool_has_25_students_with_budget_utilities_and_traits():
     pool = st.make_pool(seed=1, day=1)
     assert len(pool) == 25
     for s in pool.values():
-        assert s["budget"] == 1_000
+        assert s["budget"] == CONFIG["students"]["budget"]
         assert len(s["utilities"]) == 6
         assert all(30 <= u <= 300 for u in s["utilities"].values())
         assert 30 <= s["traits"]["patience"] <= 60
@@ -120,7 +121,7 @@ def test_same_purchases_at_1x_and_8x():
 def test_students_never_overspend_and_keep_budget_between_visits():
     state = sim.simulate_day(sim.morning_setup(logic.new_game(seed=5)), speed=8)
     for s in state["students"].values():
-        spent = 1_000 - s["budget"]
+        spent = CONFIG["students"]["budget"] - s["budget"]
         assert s["budget"] >= 0
         paid = sum(state["shops"][p["shop"]]["prices"][i] for p in s["purchases"] for i in p["items"])
         assert paid == spent

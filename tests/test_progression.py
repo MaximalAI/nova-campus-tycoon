@@ -31,23 +31,27 @@ def test_upgrade_needs_money():
         go(logic.new_game(seed=1), type="buy_upgrade", shop="cafe", upgrade="branding")
 
 
+def next_day(state):
+    state, _ = go(state, t=21.0, type="tick")
+    state, _ = go(state, t=21.0, type="next_day")
+    return state
+
+
 def test_manager_and_acquisition(rich):
     with pytest.raises(GameError, match="manager"):
         go(rich, type="buy_competitor")
-    state, _ = go(rich, type="hire_manager", shop="cafe")
-    assert state["shops"]["cafe"]["manager"]
+    state, res = go(rich, type="hire_manager", shop="cafe")
+    assert "tomorrow" in res["toast"]
+    assert state["shops"]["cafe"]["manager_hired"] and not state["shops"]["cafe"]["manager"]
     with pytest.raises(GameError):
         go(state, type="hire_manager", shop="cafe")
-    state, res = go(state, type="buy_competitor")
+    state, _ = go(state, type="buy_competitor")  # possible as soon as the manager is hired
     assert state["shops"]["rival"]["owner"] == "player"
-    restock = res["restock"]["cost"]  # V3: the barista restocks right after the purchase
-    assert state["money"] == 200_000 - CONFIG["manager_cost"] - CONFIG["acquisition_cost"] - restock
+    assert state["money"] == 200_000 - CONFIG["manager_cost"] - CONFIG["acquisition_cost"]
     assert state["status"] == logic.RUNNING
-    state, _ = go(state, type="enter_wholesaler")
-    state, _ = go(state, type="set_cart_item", item="tea_leaves", qty=1)
 
 
-def test_victory(rich):
+def test_victory_when_both_shops_have_a_manager(rich):
     state, _ = go(rich, type="hire_manager", shop="cafe")
     state, _ = go(state, type="buy_competitor")
     state, _ = go(state, type="hire_manager", shop="rival")
@@ -69,12 +73,27 @@ def test_bot_serves_without_touching_player_money():
     assert res["amount"] == 270
     assert state["money"] == 5_000
     assert state["stats"]["rival_revenue"] == 270
-    assert state["students"]["s2"]["budget"] == 730
+    assert state["students"]["s2"]["budget"] == CONFIG["students"]["budget"] - 270
+
+
+def manager_working(rich):
+    state, _ = go(rich, type="hire_manager", shop="cafe")
+    return next_day(state)
+
+
+def test_manager_starts_the_next_day(rich):
+    state, _ = go(rich, type="hire_manager", shop="cafe")
+    assert not logic.is_auto(state, "cafe")  # today you still serve yourself
+    assert logic.work_shop(state) == "cafe"
+    state = next_day(state)
+    assert state["shops"]["cafe"]["manager"] and logic.is_auto(state, "cafe")
+    assert logic.work_shop(state) is None  # nothing left to run yourself until you buy the competitor
 
 
 def test_manager_serves_from_stock(rich):
-    state, _ = go(rich, type="hire_manager", shop="cafe")
+    state = manager_working(rich)
     state["shops"]["cafe"]["stock"] = [{"item": "coffee_beans", "units": 1, "age": 0}]
+    state["manager_proposals"]["cafe"]["done"] = True
     state, _ = go(state, t=8.0, type="tick")
     state = queued(state, "s1", "cafe", ["coffee", "pastel_de_nata"])
     before = state["money"]
@@ -85,14 +104,66 @@ def test_manager_serves_from_stock(rich):
 
 
 def test_player_cannot_serve_manually_where_a_manager_works(rich):
-    state, _ = go(rich, type="hire_manager", shop="cafe")
+    state = manager_working(rich)
     state, _ = go(state, t=8.0, type="tick")
     state = queued(state, "s1", "cafe", ["coffee"])
     with pytest.raises(GameError):
         go(state, t=8.1, type="accept", shop="cafe", student="s1", player_inside=True)
 
 
-# V3: the bought competitor keeps selling automatically -------------------------
+def test_happy_customers_of_the_manager_raise_reputation(rich):
+    state = manager_working(rich)
+    state["shops"]["cafe"]["stock"] = [{"item": "coffee_beans", "units": 25, "age": 0}]
+    state, _ = go(state, t=8.0, type="tick")
+    rep = state["reputation"]
+    state = queued(state, "s1", "cafe", ["coffee"])
+    state, res = go(state, t=8.2, type="auto_serve", shop="cafe", student="s1")
+    assert res["rep_delta"] == CONFIG["reputation"]["staff_served"]
+    assert state["reputation"] == rep + CONFIG["reputation"]["staff_served"]
+
+
+# v5: manager proposals -----------------------------------------------------------
+
+
+def test_manager_proposes_shopping_list_and_prices_in_the_morning(rich):
+    state, _ = go(rich, type="hire_manager", shop="cafe")
+    state["stats"]["shops"]["cafe"]["sold"] = {"coffee": 30, "orange_juice": 0, "pastel_de_nata": 10}
+    state["stats"]["shops"]["cafe"]["sold_out_products"] = {"pastel_de_nata": 3}
+    state = next_day(state)
+    p = state["manager_proposals"]["cafe"]
+    assert p["plan"] == {"coffee": 36, "orange_juice": 8, "pastel_de_nata": 15}
+    start = CONFIG["shops"]["cafe"]["start_prices"]
+    assert p["prices"]["pastel_de_nata"] == start["pastel_de_nata"] + 10  # sold out -> a bit more
+    assert p["prices"]["orange_juice"] == start["orange_juice"] - 10  # nobody bought it -> a bit less
+    assert p["prices"]["coffee"] == start["coffee"]
+    assert p["shopping_list"]["coffee_beans"] == 2 and p["cost"] > 0 and not p["done"]
+
+
+def test_accepting_or_changing_the_proposal_buys_right_away(rich):
+    state = manager_working(rich)
+    money = state["money"]
+    state, res = go(state, t=5.5, type="confirm_manager_plan", shop="cafe",
+                    plan={"coffee": 25, "orange_juice": 0, "pastel_de_nata": 5}, prices={"coffee": 100})
+    assert res["bought"] == {"coffee_beans": 1, "nata": 5}
+    assert state["money"] == money - 400 - 5 * 60
+    assert state["shops"]["cafe"]["prices"]["coffee"] == 100
+    assert state["shops"]["cafe"]["prices_set"]
+    assert logic.stock_units(state, "cafe", "coffee_beans") == 25
+    with pytest.raises(GameError, match="already"):
+        go(state, t=5.6, type="confirm_manager_plan", shop="cafe")
+
+
+def test_manager_buys_the_proposal_at_seven_if_you_did_nothing(rich):
+    state = manager_working(rich)
+    cost = state["manager_proposals"]["cafe"]["cost"]
+    money = state["money"]
+    state, res = go(state, t=7.0, type="tick")
+    assert state["manager_proposals"]["cafe"]["done"]
+    assert state["money"] == money - cost
+    assert res["manager_bought"] == ["cafe"]
+
+
+# v5: running the bought competitor yourself ---------------------------------------
 
 
 def bought(rich):
@@ -101,65 +172,53 @@ def bought(rich):
     return state, res
 
 
-def test_bought_competitor_keeps_its_barista_and_sells_automatically(rich):
+def test_bought_competitor_has_no_staff_and_opens_tomorrow(rich):
     state, res = bought(rich)
-    assert state["shops"]["rival"]["staff"] is True
-    assert logic.is_auto(state, "rival")
-    assert "barista restocked" in res["toast"]
+    rival = state["shops"]["rival"]
+    assert rival["staff"] is False and not rival["manager"] and rival["stock"] == []
+    assert not logic.shop_operating(state, "rival")  # closed for the rest of today
+    assert logic.work_shop(state) == "cafe"
+    assert "tomorrow" in res["toast"]
 
 
-def test_purchase_restocks_the_competitor_immediately(rich):
-    state, res = bought(rich)
-    stock = {b["item"]: b["units"] for b in state["shops"]["rival"]["stock"]}
-    # 20 coffee + 15 tea + 15 croissants -> 1 pack beans, 1 box tea, 15 croissants
-    assert stock == {"coffee_beans": 25, "tea_leaves": 20, "croissant_dough": 15}
-    assert res["restock"]["cost"] == 400 + 240 + 15 * 50
-    assert state["money"] == 200_000 - CONFIG["manager_cost"] - CONFIG["acquisition_cost"] - 1_390
-
-
-def test_customers_of_the_bought_competitor_get_their_order_and_pay(rich):
+def test_next_day_you_work_in_the_new_shop_and_the_manager_runs_the_cafe(rich):
     state, _ = bought(rich)
+    state = next_day(state)
+    assert logic.work_shop(state) == "rival"
+    assert logic.shop_operating(state, "rival") and logic.shop_operating(state, "cafe")
+    assert not logic.is_auto(state, "rival") and logic.is_auto(state, "cafe")
+    assert "cafe" in state["manager_proposals"] and "rival" not in state["manager_proposals"]
+    assert set(state["plan"]) == set(CONFIG["shops"]["rival"]["products"])
+    # your own shopping list only covers the new shop
+    state, res = go(state, t=5.2, type="confirm_plan", plan={"coffee": 10, "tea": 10, "croissant": 5})
+    assert res["shopping_list"] == {"coffee_beans": 1, "tea_leaves": 1, "croissant_dough": 5}
+    with pytest.raises(GameError):
+        go(state, t=5.3, type="confirm_plan", plan={"orange_juice": 5})
+
+
+def test_you_serve_the_new_shop_by_hand(rich):
+    state, _ = bought(rich)
+    state = next_day(state)
+    state["shops"]["rival"]["stock"] = [{"item": "tea_leaves", "units": 20, "age": 0}]
     state, _ = go(state, t=8.0, type="tick")
-    state = queued(state, "s3", "rival", ["tea", "croissant"])
+    state = queued(state, "s3", "rival", ["tea"])
+    state, _ = go(state, t=8.1, type="at_counter", shop="rival", student="s3")
+    state, _ = go(state, t=8.1, type="accept", shop="rival", student="s3", player_inside=True)
+    state, _ = go(state, t=8.15, type="prepare", shop="rival", product="tea", player_inside=True)
     before = state["money"]
-    state, res = go(state, t=8.2, type="auto_serve", shop="rival", student="s3")
-    assert res["items"] == ["tea", "croissant"]
-    assert res["amount"] == 120 + 150
-    assert state["money"] == before + 270
-    assert state["students"]["s3"]["budget"] == 1_000 - 270
-    assert state["students"]["s3"]["status"] == st.WANDERING
-    assert state["stats"]["shops"]["rival"]["served"] == 1
+    state, res = go(state, t=8.2, type="handover", shop="rival", student="s3", player_inside=True)
+    assert res["correct"] and state["money"] == before + 120
 
 
-def test_competitor_restocks_every_morning(rich):
+def test_old_save_with_barista_runs_the_new_shop_yourself(rich):
     state, _ = bought(rich)
-    state, _ = go(state, t=21.0, type="tick")  # croissants spoil overnight
-    state, _ = go(state, t=21.0, type="next_day")
-    stock = {}
-    for b in state["shops"]["rival"]["stock"]:
-        stock[b["item"]] = stock.get(b["item"], 0) + b["units"]
-    assert stock["croissant_dough"] == 15
-    assert state["restock"]["items"]["croissant_dough"] == 15
-    assert state["stats"]["purchase_cost"] == state["restock"]["cost"]
-
-
-def test_restock_only_buys_what_the_money_allows(rich):
-    state, _ = go(rich, type="hire_manager", shop="cafe")
-    state["money"] = CONFIG["acquisition_cost"] + 500  # after the purchase only €5.00 are left
-    state, res = go(state, type="buy_competitor")
-    assert res["restock"]["cost"] <= 500
-    assert state["money"] >= 0
-
-
-def test_v2_save_without_staff_still_works():
-    state = logic.new_game(seed=5)
-    state["money"] = 200_000
-    state, _ = go(state, type="hire_manager", shop="cafe")
-    state, _ = go(state, type="buy_competitor")
-    for shop in state["shops"].values():
-        del shop["staff"]  # what a v2 save looks like
-    del state["restock"]
+    rival = state["shops"]["rival"]
+    rival["staff"] = True  # what a v3/v4 save looks like
+    for key in ("manager_hired", "opens_day", "prices_set"):
+        for shop in state["shops"].values():
+            shop.pop(key, None)
+    state["shops"]["cafe"]["manager"] = True
+    del state["manager_proposals"]
     logic.migrate(state)
-    assert state["shops"]["rival"]["staff"] is True
-    assert state["shops"]["cafe"]["staff"] is False
-    assert logic.is_auto(state, "rival")
+    assert rival["staff"] is False and state["shops"]["cafe"]["manager_hired"]
+    assert logic.work_shop(state) == "rival"

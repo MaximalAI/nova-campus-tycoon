@@ -50,10 +50,15 @@ def shop_at_wholesaler(game, cart):
     return state
 
 
-def test_cart_is_prefilled_from_the_shopping_list(game):
+def test_cart_starts_empty_and_the_shopping_list_is_only_a_reference(game):
+    # v5: the player takes every product from its stand himself
     state, _ = go(game, type="confirm_plan", plan={"coffee": 10, "orange_juice": 2, "pastel_de_nata": 4})
     state, _ = go(state, type="enter_wholesaler")
-    assert state["cart"] == {"coffee_beans": 1, "oranges": 1, "nata": 4}
+    assert state["cart"] == {}
+    assert state["shopping_list"] == {"coffee_beans": 1, "oranges": 1, "nata": 4}
+    state, _ = go(state, type="set_cart_item", item="nata", qty=6)  # more than on the list is fine
+    state, _ = go(state, type="set_cart_item", item="coffee_beans", qty=1)
+    assert state["cart"] == {"nata": 6, "coffee_beans": 1}
 
 
 def test_pay_moves_cart_into_bag(game):
@@ -168,6 +173,7 @@ def test_euro_format():
 def test_second_visit_does_not_refill_the_cart(game):
     state, _ = go(game, type="confirm_plan", plan={"coffee": 10, "orange_juice": 0, "pastel_de_nata": 0})
     state, _ = go(state, type="enter_wholesaler")
+    state, _ = go(state, type="set_cart_item", item="coffee_beans", qty=1)
     state, _ = go(state, type="pay")
     state, _ = go(state, type="leave_wholesaler")
     state, _ = go(state, type="enter_wholesaler")

@@ -271,11 +271,12 @@ def test_continue_inside_the_wholesaler_starts_outside_with_an_empty_cart():
     state = logic.new_game(seed=3)
     state, _ = go(state, 5.2, type="confirm_plan", plan={"coffee": 25})
     state, _ = go(state, 5.6, type="enter_wholesaler")
+    state, _ = go(state, 5.65, type="set_cart_item", item="coffee_beans", qty=1)
     assert state["cart"]
     state, _ = go(state, 5.7, type="resume")
     assert not state["in_wholesaler"] and state["cart"] == {}
     state, _ = go(state, 5.8, type="enter_wholesaler")
-    assert state["cart"] == {"coffee_beans": 1}  # the shopping list is in the cart again
+    assert state["cart"] == {}  # v5: the cart always starts empty
 
 
 def test_float_clock_just_below_the_mark_still_counts():

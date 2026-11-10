@@ -171,6 +171,8 @@ def morning_setup(state: dict) -> dict:
         state, _ = logic.apply(state, dict(ev, t=t))
     go({"type": "confirm_plan", "plan": {"coffee": 25, "orange_juice": 6, "pastel_de_nata": 12}}, 5.2)
     go({"type": "enter_wholesaler"}, 5.6)
+    for i, item in enumerate(state["shopping_list"]):  # take each item from its stand
+        go({"type": "set_cart_item", "item": item, "qty": state["shopping_list"][item]}, 5.7 + i * 0.05)
     go({"type": "pay"}, 6.0)
     go({"type": "stock_goods", "shop": "cafe"}, 6.6)
     return state

@@ -14,10 +14,20 @@ class UI {
       b.addEventListener("click", () => game.setSpeed(Number(b.dataset.speed))));
     this.$("#pause-btn").addEventListener("click", () => game.flow.openPause());
     this.$("#skip-btn").addEventListener("click", () => game.flow.skipToOpening());
+    this.$("#gain").addEventListener("click", () => game.flow.openStats());
+    this.$("#minimap").addEventListener("click", () => game.openBigMap());
+    this.$("#bigmap-close").addEventListener("click", () => game.closeBigMap());
+    this.$("#bigmap").addEventListener("click", (e) => {
+      const spot = e.target.closest("[data-go]");
+      if (spot) game.teleportTo(spot.dataset.go);
+      else if (e.target.id === "bigmap") game.closeBigMap();
+    });
     this.$("#tray").addEventListener("click", (e) => {
       const b = e.target.closest("button");
       if (!b) return;
       if (b.dataset.act === "discard") game.flow.discardTray();
+      if (b.dataset.act === "extras") game.flow.discardTray({ only_extras: true });
+      if (b.dataset.act === "one") game.flow.discardTray({ product: b.dataset.product });
       if (b.dataset.act === "cancel") game.flow.confirmCancelOrder();
     });
   }
@@ -38,6 +48,10 @@ class UI {
     const money = this.$("#money");
     money.textContent = euro(v.money);
     money.classList.toggle("neg", v.money <= 0);
+    const gain = v.today ? v.today.gain : 0;
+    const gEl = this.$("#gain");
+    gEl.textContent = `today ${gain >= 0 ? "+" : ""}${euro(gain)}`;
+    gEl.classList.toggle("neg", gain < 0);
     this.$("#rep-fill").style.width = `${v.reputation}%`;
     this.$("#rep-value").textContent = `${v.reputation} / 100`;
     this.updateRepPerks(v);
@@ -54,9 +68,18 @@ class UI {
     if (order) {
       tray.classList.remove("hidden");
       const need = order.items.map((p) => g.config.products[p].icon).join(" ");
+      // v5: each slot on the tray has its own ✕; products the order does not need are marked red
+      const rest = [...order.items];
+      const slots = v.tray.map((p) => {
+        const wanted = rest.includes(p);
+        if (wanted) rest.splice(rest.indexOf(p), 1);
+        return `<div class="tray-slot ${wanted ? "" : "extra"}" title="${wanted ? "" : "not ordered"}">${g.config.products[p].icon}` +
+          `<button data-act="one" data-product="${p}" title="Throw away this ${esc(g.config.products[p].name)}">✕</button></div>`;
+      });
+      const extras = v.tray.length - (order.items.length - rest.length);
       this.setHtml("#tray", `<span>Order: ${need}</span><span>→ Tray:</span>` +
-        (v.tray.length ? v.tray.map((p) => `<div class="tray-slot">${g.config.products[p].icon}</div>`).join("") : `<div class="tray-slot"></div>`) +
-        (v.tray.length ? `<button data-act="discard" title="Throw away what is on the tray">🗑 Throw away</button>` : "") +
+        (slots.length ? slots.join("") : `<div class="tray-slot"></div>`) +
+        (extras > 0 ? `<button data-act="extras" title="Throw away everything the customer did not order">🗑 Throw away extras</button>` : "") +
         `<button data-act="cancel" class="danger" title="Give up this order">✖ Cancel order</button>`);
     } else tray.classList.add("hidden");
   }
@@ -88,7 +111,7 @@ class UI {
     const owned = Object.keys(v.shops).filter((s) => v.shops[s].owner === "player");
     for (const s of owned) {
       const portions = v.shops[s].portions || {};
-      if (owned.length > 1) html += `<div class="stock-shop">${esc(cfg.shops[s].name)}${v.shops[s].staff ? " (barista)" : ""}</div>`;
+      if (owned.length > 1) html += `<div class="stock-shop">${esc(cfg.shops[s].name)}${v.shops[s].manager ? " (manager)" : s === v.work_shop ? " (you)" : ""}</div>`;
       html += `<div class="stock-row">` + Object.entries(portions).map(([p, n]) => {
         const c = n === 0 ? "out" : n <= 3 ? "low" : "";
         return `<span class="${c}" title="${esc(cfg.products[p].name)}: ${n} left">${cfg.products[p].icon} ${n}</span>`;
@@ -107,13 +130,17 @@ class UI {
     if (!show) { panel.classList.add("hidden"); return; }
     panel.classList.remove("hidden");
     const items = this.game.config.wholesale_items;
-    const keys = [...new Set([...Object.keys(v.shopping_list || {}), ...Object.keys(v.cart || {})])];
-    let html = `<h4>🛒 Shopping list · cart</h4>`;
-    if (!keys.length) html += `<div class="row">Nothing planned yet</div>`;
+    // The shopping list only matters for the morning shopping, not for a restock during the day.
+    const list = v.open || v.closed ? {} : (v.shopping_list || {});
+    const keys = [...new Set([...Object.keys(list), ...Object.keys(v.cart || {})])];
+    let html = `<h4>${Object.keys(list).length ? "🛒 Shopping list · cart" : "🛒 Cart"}</h4>`;
+    if (!keys.length) html += `<div class="row">${v.open ? "Take what you need from the stands" : "Nothing planned yet"}</div>`;
     for (const i of keys) {
-      const want = (v.shopping_list || {})[i] || 0, have = (v.cart || {})[i] || 0;
-      const cls = have >= want && want ? "ok" : have < want ? "miss" : "";
-      const mark = have >= want && want ? "✔" : have < want ? `${want - have} missing` : "extra";
+      const have = (v.cart || {})[i] || 0;
+      if (!(i in list)) { html += `<div class="row"><span>${items[i].icon} ${esc(items[i].name)}</span><span>${have} in cart</span></div>`; continue; }
+      const want = list[i];
+      const cls = have >= want ? "ok" : "miss";
+      const mark = have > want ? `+${have - want} extra` : have === want ? "✔" : `${want - have} missing`;
       html += `<div class="row ${cls}"><span>${items[i].icon} ${esc(items[i].name)}</span><span>${have}/${want} · ${mark}</span></div>`;
     }
     html += `<div class="row total"><span>Cart total</span><span>${euro(v.cart_total || 0)}</span></div>`;
@@ -158,6 +185,7 @@ class UI {
     if (this.current) { if (spec.urgent) this.queue.unshift(spec); else this.queue.push(spec); return; }
     this.current = spec;
     this.renderDialog();
+    if (spec.onShow) spec.onShow();
   }
   closeDialog() {
     if (this.current && this.current.onClose) this.current.onClose();
@@ -166,7 +194,7 @@ class UI {
     this.$("#dialog").innerHTML = "";
     if (this.queue.length) {
       const next = this.queue.shift();
-      if (!next.valid || next.valid()) { this.current = next; this.renderDialog(); }
+      if (!next.valid || next.valid()) { this.current = next; this.renderDialog(); if (next.onShow) next.onShow(); }
       else this.closeDialog();
     }
     this.game.focus();
