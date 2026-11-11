@@ -100,7 +100,7 @@ class Game {
     const v = this.view;
     const places = [
       { key: "cafe", label: "☕ Your café", color: "#2e8b57", at: { x: -34, z: 9 } },
-      { key: "rival", label: v.shops.rival.owner === "player" ? "🏪 Café da Esquina (yours)" : "🏪 Competitor", color: v.shops.rival.owner === "player" ? "#2e8b57" : "#c0392b", at: { x: 0, z: -31 } },
+      { key: "rival", label: v.shops.rival.owner === "player" ? "🏪 Café da Esquina (yours)" : v.rival_sold ? "🏪 Café da Esquina (yours tomorrow)" : "🏪 Competitor", color: v.shops.rival.owner === "player" ? "#2e8b57" : "#c0392b", at: { x: 0, z: -31 } },
       { key: "wholesale", label: "🏬 Wholesaler", color: "#2c6fbb", at: { x: 37, z: 12.5 } },
     ];
     const block = this.teleportBlock();
@@ -215,6 +215,11 @@ class Game {
       }
       if (e.code === "KeyE" && !this.ui.dialogOpen) this.interact();
       if (e.code === "KeyP") this.flow.openPause();
+      if (e.code === "KeyM" && this.view) {
+        // v6: M opens and closes the big map
+        if (this.root.querySelector("#bigmap").classList.contains("hidden")) { if (!this.ui.dialogOpen) this.openBigMap(); }
+        else this.closeBigMap();
+      }
     });
     window.addEventListener("keyup", (e) => {
       if (keys[e.code]) this.input[keys[e.code]] = false;
@@ -265,8 +270,8 @@ class Game {
       if (this.pointerLocked) { drag = null; this.lockFailed = false; }
       this.root.querySelector("#crosshair").classList.toggle("hidden", !this.pointerLocked);
       this.root.querySelector("#help").innerHTML = this.pointerLocked
-        ? "<b>Mouse</b> look · <b>WASD</b> walk · <b>Shift</b> run · <b>Click / E</b> use · <b>Esc</b> free the mouse"
-        : "<b>Click the game</b> for mouse look · <b>WASD</b> walk · <b>Shift</b> run · <b>E</b> use · <b>Tab</b> list · <b>P</b> pause";
+        ? "<b>Mouse</b> look · <b>WASD</b> walk · <b>Shift</b> run · <b>Click / E</b> use · <b>M</b> map · <b>Esc</b> free the mouse"
+        : "<b>Click the game</b> for mouse look · <b>WASD</b> walk · <b>Shift</b> run · <b>E</b> use · <b>M</b> map · <b>Tab</b> list · <b>P</b> pause";
     };
     document.addEventListener("pointerlockchange", onLockChange);
     document.addEventListener("pointerlockerror", () => this.onLockError());
@@ -512,13 +517,31 @@ class Game {
         const e = ui.label("b" + a.id, `<div class="stack">${pat}<div class="bubble n${Math.min(3, n)}" style="position:relative">${icons}</div></div>`);
         ui.placeLabel(e, new THREE.Vector3(a.pos.x, 2.15, a.pos.z), this.camera, W, H);
       }
+      // v6: what the staff are doing right now (making coffee, pressing juice, cleaning)
+      for (const [shop, w] of Object.entries(this.workers)) {
+        if (!w.figure.visible || !w.activity || dist2(w.pos, this.player.pos) > 40) continue;
+        const pct = Math.round(clamp(w.activity.progress, 0, 1) * 100);
+        const e = ui.label("w" + shop, `<div class="stack"><div class="work-tag">${w.activity.icon} ${esc(w.activity.text)}</div>` +
+          `<div class="patience"><div style="width:${pct}%;background:#2a9d8f"></div></div></div>`);
+        ui.placeLabel(e, new THREE.Vector3(w.pos.x, 2.25, w.pos.z), this.camera, W, H);
+      }
     }
     ui.endLabels();
   }
 
   // Nobody walks through anybody: people push each other apart, the player is pushed out of them.
   separatePeople() {
-    const list = [...this.flow.agents.values()].filter((a) => a.figure.visible);
+    const now = performance.now();
+    // v6: a walker that hardly moved for a second is stuck in a group: it may pass through
+    // the others for 2.5 s (ghost), so groups never block each other for good.
+    for (const a of this.flow.agents.values()) {
+      if (!a.figure.visible || !a.path.length) { a.stuckSince = null; continue; }
+      if (!a.lastCheck || now - a.lastCheck.t > 1000) {
+        if (a.lastCheck && dist2(a.pos, a.lastCheck) < 0.04 && this.clock.running) a.ghostUntil = now + 2500;
+        a.lastCheck = { x: a.pos.x, z: a.pos.z, t: now };
+      }
+    }
+    const list = [...this.flow.agents.values()].filter((a) => a.figure.visible && !(a.ghostUntil > now));
     for (const wk of Object.values(this.workers)) if (wk.figure.visible) list.push(wk);
     const R = 0.62;
     for (let i = 0; i < list.length; i++) {

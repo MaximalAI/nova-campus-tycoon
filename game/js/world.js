@@ -20,7 +20,8 @@ const P = {
     staff: { x: -36.4, z: -0.6 },
     register: { x: -35.8, z: -0.6 }, storage: { x: -38.6, z: 3.6 }, serve: { x: -36.4, z: 0 }, spawn: { x: -24.5, z: 0 },
     // customers leave along a side lane, so they do not walk through the queue behind them
-    exit: [{ x: -34.0, z: 1.25 }, { x: -29.4, z: 1.1 }, { x: -26.4, z: 1.4 }],
+    // v6: through the middle of the door (it is 3 m wide), not along the wall
+    exit: [{ x: -34.0, z: 1.2 }, { x: -29.6, z: 1.0 }, { x: -28.0, z: 0.8 }, { x: -26.4, z: 0.9 }],
   },
   rival: {
     doorOut: { x: 0, z: -14.4 }, doorIn: { x: 0, z: -17.4 },
@@ -30,7 +31,7 @@ const P = {
     cam: { x: 0, y: 4.6, z: -26.4, lx: 0, ly: 0.6, lz: -16 },
     staff: { x: 0.6, z: -22.4 },
     register: { x: 0.6, z: -21.9 }, storage: { x: 4.2, z: -25.5 }, serve: { x: 0, z: -22.4 }, spawn: { x: 2.6, z: -11.5 },
-    exit: [{ x: -1.25, z: -20.0 }, { x: -1.1, z: -17.4 }, { x: -1.4, z: -14.2 }],
+    exit: [{ x: -1.2, z: -20.0 }, { x: -1.0, z: -17.6 }, { x: -0.8, z: -16.0 }, { x: -0.9, z: -14.2 }],
   },
   wholesale: { doorOut: { x: 25.6, z: 0 }, doorIn: { x: 29.4, z: 0 } },
 };
@@ -226,7 +227,15 @@ class World {
       const glass = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.55, 0.65),
         new THREE.MeshLambertMaterial({ color: 0xbde0fe, transparent: true, opacity: 0.45 }));
       glass.position.set(0, 1.3, 0); g.add(glass); meshes.push(glass);
-      for (let i = 0; i < 4; i++) add(new THREE.CylinderGeometry(0.12, 0.1, 0.08, 12), 0xf6bd60, -0.4 + i * 0.27, 1.1, 0);
+      if (shop === "rival") {
+        // v6: croissants (half rings) instead of pastéis de nata
+        for (let i = 0; i < 3; i++) {
+          const c = add(new THREE.TorusGeometry(0.11, 0.05, 8, 14, Math.PI * 1.25), 0xd9963b, -0.36 + i * 0.36, 1.1, 0);
+          c.rotation.x = -Math.PI / 2; c.rotation.z = Math.PI * 0.12;
+        }
+      } else {
+        for (let i = 0; i < 4; i++) add(new THREE.CylinderGeometry(0.12, 0.1, 0.08, 12), 0xf6bd60, -0.4 + i * 0.27, 1.1, 0);
+      }
     } else if (kind === "kettle") {
       add(new THREE.CylinderGeometry(0.22, 0.26, 0.45, 14), 0xc0c0c0, 0, 1.25, 0);
       add(new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8), 0x555555, 0.25, 1.35, 0).rotation.z = -0.8;
@@ -345,7 +354,8 @@ class World {
     for (const [spot, [mesh, pos]] of Object.entries(cleaning)) {
       this.addInteractable({ id: "clean_" + spot, pos, meshes: [mesh], cleaning: spot, priority: 2,
         label: () => g.config.cleaning_spots[spot].name,
-        enabled: () => g.view && g.view.day_state === "CLOSING" && !g.view.cleaning[spot],
+        // v6: with a manager the player cannot clean - the manager does it
+        enabled: () => g.view && g.view.day_state === "CLOSING" && !g.view.cleaning[spot] && !g.view.shops.cafe.manager_hired,
         action: () => g.flow.openCleaning(spot) });
     }
     this.addInteractable({ id: "counter_front_cafe", pos: { x: -35.6, z: 0.2 }, radius: 1.8, meshes: [], priority: 1,
@@ -415,13 +425,14 @@ class World {
     make("cafe", -25.6, -2.9, Math.PI / 2);
     make("rival", 3.6, -14.4, 0);
     // FOR SALE sign next to the competitor's door
-    const sale = new THREE.Group(); sale.position.set(-3.7, 0, -14.6);
-    this.box(0.1, 1.9, 0.1, 0x5d4037, 0, 0.95, 0, { parent: sale });
+    const sale = new THREE.Group(); sale.position.set(-4.25, 0, -14.6);
+    // v6: two posts behind the plate, so nothing covers the letters
+    for (const px of [-0.6, 0.6]) this.box(0.08, 1.85, 0.08, 0x5d4037, px, 0.925, -0.08, { parent: sale });
     const tex = this.textTexture("FOR SALE", "#c0392b", "#ffffff", 512, 200, 96);
     const plate = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.55, 0.05), [
       this.mat(0xffffff), this.mat(0xffffff), this.mat(0xffffff), this.mat(0xffffff),
       new THREE.MeshLambertMaterial({ map: tex, emissive: 0x000000 }), new THREE.MeshLambertMaterial({ map: tex, emissive: 0x000000 })]);
-    plate.position.set(0.55, 1.55, 0); plate.castShadow = true; sale.add(plate);
+    plate.position.set(0, 1.55, 0); plate.castShadow = true; sale.add(plate);
     sale.visible = false;
     this.scene.add(sale);
     this.forSale = sale;
@@ -431,7 +442,8 @@ class World {
     for (const [shop, b] of Object.entries(this.priceBoards || {})) {
       const s = view.shops[shop];
       const known = s.prices_set || s.owner === "bot";
-      const key = JSON.stringify([s.prices, known, s.operating, s.owner]);
+      const sold = shop === "rival" && view.rival_sold;
+      const key = JSON.stringify([s.prices, known, s.operating, s.owner, sold]);
       if (key === b.key) continue;
       b.key = key;
       const g = b.canvas.getContext("2d"), W = b.canvas.width, H = b.canvas.height;
@@ -449,6 +461,7 @@ class World {
         g.fillStyle = "#f4e9c9";
       });
       if (!s.operating) { g.textAlign = "center"; g.font = "900 46px sans-serif"; g.fillStyle = "#ff8a80"; g.fillText("CLOSED TODAY", W / 2, H - 50); }
+      if (sold) { g.textAlign = "center"; g.font = "900 46px sans-serif"; g.fillStyle = "#7ee2a8"; g.fillText("SOLD - NEW OWNER TOMORROW", W / 2, H - 50, W - 40); }
       b.tex.needsUpdate = true;
     }
     if (this.forSale) this.forSale.visible = !!view.can_buy_competitor;

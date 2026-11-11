@@ -80,11 +80,9 @@ def test_price_board_shows_dash_until_prices_are_set_or_the_shop_opens():
 # --- shops that are closed do not get customers ----------------------------------------
 
 
-def test_a_shop_bought_today_gets_no_customers_until_tomorrow():
+def test_a_shop_you_do_not_run_and_has_no_manager_gets_no_customers():
     state = logic.new_game(seed=3)
-    state["money"] = 100_000
-    state, _ = go(state, 6.0, type="hire_manager", shop="cafe")
-    state, _ = go(state, 6.0, type="buy_competitor")
+    state["shops"]["rival"].update({"owner": "player", "staff": False, "opens_day": 2})
     state, _ = go(state, 8.0, type="tick")
     for sid, s in state["students"].items():
         s["status"] = st.WANDERING

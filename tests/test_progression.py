@@ -46,18 +46,39 @@ def test_manager_and_acquisition(rich):
     with pytest.raises(GameError):
         go(state, type="hire_manager", shop="cafe")
     state, _ = go(state, type="buy_competitor")  # possible as soon as the manager is hired
-    assert state["shops"]["rival"]["owner"] == "player"
+    assert state["shops"]["rival"]["sold"] and state["shops"]["rival"]["owner"] == "bot"  # v6: yours tomorrow
     assert state["money"] == 200_000 - CONFIG["manager_cost"] - CONFIG["acquisition_cost"]
     assert state["status"] == logic.RUNNING
+    with pytest.raises(GameError, match="tomorrow"):
+        go(state, type="buy_competitor")
+    state = next_day(state)
+    assert state["shops"]["rival"]["owner"] == "player" and not state["shops"]["rival"]["sold"]
 
 
 def test_victory_when_both_shops_have_a_manager(rich):
     state, _ = go(rich, type="hire_manager", shop="cafe")
     state, _ = go(state, type="buy_competitor")
+    with pytest.raises(GameError, match="own"):
+        go(state, type="hire_manager", shop="rival")  # not yours before tomorrow
+    state = next_day(state)
     state, _ = go(state, type="hire_manager", shop="rival")
     assert state["status"] == logic.VICTORY
     with pytest.raises(GameError):
         go(state, type="enter_wholesaler")
+
+
+def test_keep_playing_in_open_mode_after_the_victory(rich):
+    state, _ = go(rich, type="hire_manager", shop="cafe")
+    state, _ = go(state, type="buy_competitor")
+    state = next_day(state)
+    with pytest.raises(GameError, match="after you have won"):
+        go(state, type="continue_open_mode")
+    state, _ = go(state, type="hire_manager", shop="rival")
+    state, res = go(state, type="continue_open_mode")
+    assert state["status"] == logic.RUNNING and state["open_mode"]
+    assert logic.view(state)["open_mode"]
+    state = next_day(state)  # the game simply goes on
+    assert state["status"] == logic.RUNNING and state["day"] == 3
 
 
 def queued(state, sid, shop, items):
@@ -172,13 +193,17 @@ def bought(rich):
     return state, res
 
 
-def test_bought_competitor_has_no_staff_and_opens_tomorrow(rich):
+def test_bought_competitor_becomes_yours_the_next_morning(rich):
     state, res = bought(rich)
     rival = state["shops"]["rival"]
-    assert rival["staff"] is False and not rival["manager"] and rival["stock"] == []
-    assert not logic.shop_operating(state, "rival")  # closed for the rest of today
+    assert rival["owner"] == "bot" and rival["staff"]  # the old owner runs it until tonight
+    assert logic.shop_operating(state, "rival")
     assert logic.work_shop(state) == "cafe"
     assert "tomorrow" in res["toast"]
+    assert not logic.view(state)["can_buy_competitor"] and logic.view(state)["rival_sold"]
+    state = next_day(state)
+    rival = state["shops"]["rival"]
+    assert rival["owner"] == "player" and rival["staff"] is False and not rival["manager"] and rival["stock"] == []
 
 
 def test_next_day_you_work_in_the_new_shop_and_the_manager_runs_the_cafe(rich):
@@ -212,9 +237,10 @@ def test_you_serve_the_new_shop_by_hand(rich):
 
 def test_old_save_with_barista_runs_the_new_shop_yourself(rich):
     state, _ = bought(rich)
+    state = next_day(state)
     rival = state["shops"]["rival"]
     rival["staff"] = True  # what a v3/v4 save looks like
-    for key in ("manager_hired", "opens_day", "prices_set"):
+    for key in ("manager_hired", "opens_day", "prices_set", "sold"):
         for shop in state["shops"].values():
             shop.pop(key, None)
     state["shops"]["cafe"]["manager"] = True

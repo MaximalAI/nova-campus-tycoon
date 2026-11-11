@@ -58,6 +58,19 @@ class Figure {
     if (stride > 0) { this.phase += stride * 3.2; this.swing = Math.min(1, this.swing + 0.3); }
     else { this.swing *= 0.6; if (this.swing < 0.02) { this.swing = 0; this.phase = 0; } }
     const a = Math.sin(this.phase) * 0.6 * this.swing;
+    if (this.work && stride === 0) {
+      // v6: working at a station or cleaning: arms move in front of the body
+      this.workT = (this.workT || 0) + 0.016;
+      const k = this.work === "clean" ? 9 : this.work === "juice" ? 11 : 6;
+      const w = Math.sin(this.workT * k);
+      this.armL.rotation.x = -1.1 + w * (this.work === "clean" ? 0.15 : 0.35);
+      this.armR.rotation.x = -1.1 - w * (this.work === "clean" ? 0.15 : 0.35);
+      this.armL.rotation.z = this.work === "clean" ? w * 0.6 : 0;
+      this.armR.rotation.z = this.work === "clean" ? w * 0.6 : 0;
+      this.legL.rotation.x = 0; this.legR.rotation.x = 0;
+      return;
+    }
+    this.armL.rotation.z = 0; this.armR.rotation.z = 0;
     this.legL.rotation.x = a; this.legR.rotation.x = -a;
     this.armL.rotation.x = -a * 0.8; this.armR.rotation.x = a * 0.8;
   }
@@ -228,6 +241,7 @@ class StaffAgent extends StudentAgent {
   get speed() { return 3.6; }
   reset() {
     this.steps = []; this.path = []; this.waitLeft = 0; this.job = null;
+    this.activity = null; if (this.figure) this.figure.work = null;
     this.pos = { x: this.home.x, z: this.home.z };
     this.figure.place(this.pos);
     this.faceTarget = this.shop === "cafe" ? Math.PI / 2 : Math.PI;
@@ -243,11 +257,12 @@ class StaffAgent extends StudentAgent {
   get busy() { return this.steps.length > 0 || this.path.length > 0; }
   // steps: {walk: point} | {wait: game minutes} | {face: point} | {call: fn}
   run(steps, job) { this.steps = steps.slice(); this.job = job || null; this.path = []; this.waitLeft = 0; }
-  stop() { this.steps = [{ walk: this.home }, { face: { x: this.home.x + (this.shop === "cafe" ? 5 : 0), z: this.home.z + (this.shop === "cafe" ? 0 : 5) } }]; this.job = null; this.path = []; }
+  stop() { this.activity = null; this.figure.work = null; this.steps = [{ walk: this.home }, { face: { x: this.home.x + (this.shop === "cafe" ? 5 : 0), z: this.home.z + (this.shop === "cafe" ? 0 : 5) } }]; this.job = null; this.path = []; }
   tick(dtScaled, dtGameMin) {
     const v = this.game.view;
+    // v6: a newly hired manager already comes in for the cleaning on his first evening
     this.figure.visible = !!(v && this.game.screen === "game" && (v.shops[this.shop].auto ||
-      (this.shop === "cafe" && v.shops.cafe.manager)));
+      (this.shop === "cafe" && (v.shops.cafe.manager || (v.shops.cafe.manager_hired && v.day_state === "CLOSING")))));
     if (!this.figure.visible) return;
     while (this.steps.length && !this.path.length) {
       const s = this.steps[0];
@@ -263,7 +278,11 @@ class StaffAgent extends StudentAgent {
         if (this.waitLeft <= 0 && !s.started) { this.waitLeft = s.wait; s.started = true; }
         this.waitLeft -= dtGameMin;
         dtGameMin = 0;
+        // v6: show what the staff member is doing (arms move, icon + progress above the head)
+        this.figure.work = s.work || null;
+        this.activity = s.work ? { icon: s.icon || "⚙️", text: s.text || "", progress: 1 - Math.max(0, this.waitLeft) / s.wait } : null;
         if (this.waitLeft > 0) break;
+        this.figure.work = null; this.activity = null;
         this.steps.shift();
         continue;
       }

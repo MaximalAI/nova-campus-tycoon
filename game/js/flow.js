@@ -68,7 +68,7 @@ class Flow {
       case "SET_PRICES": return P[ws].register;
       case "SHOP_OPEN": return this.game.isManual(ws) && !this.playerIn(ws) ? P[ws].serve : null;
       case "CLOSING": {
-        if (v.shops.cafe.manager) return null; // the manager cleans
+        if (v.shops.cafe.manager_hired) return null; // the manager cleans
         const it = this.game.world.interactables.find((i) => i.cleaning && !v.cleaning[i.cleaning]);
         return it ? it.pos : null;
       }
@@ -179,7 +179,7 @@ class Flow {
     const v = this.v;
     const pending = Object.entries(v.manager_proposals || {}).filter(([, p]) => !p.done).map(([s]) => s);
     if (pending.length) return this.openManagerProposal(pending[0], () => this.morningSequence());
-    if (v.work_shop && v.day_state === "MORNING_PLANNING") this.openPlanning();
+    // v6: no automatic planning pop-up - walk to the planning board (the marker shows the way)
   }
 
   // ------------------------------------------------- P23 manager's proposal
@@ -639,8 +639,8 @@ class Flow {
   // -------------------------------------------------------- P14/P15 closing
   openClosing() {
     const spots = Object.values(this.cfg.cleaning_spots).map((s) => `• ${s.name}`).join("<br>");
-    if (this.v.shops.cafe.manager) {
-      // v5: the manager cleans the café after closing (walks to each spot)
+    if (this.v.shops.cafe.manager_hired) {
+      // v5/v6: the manager (also a newly hired one) cleans the café after closing
       this.startManagerCleaning();
       return this.game.ui.toast("Closing time - your manager cleans the café.");
     }
@@ -676,7 +676,9 @@ class Flow {
     for (const spot of order) {
       if (this.v.cleaning[spot]) continue;
       const it = this.game.world.interactables.find((i) => i.cleaning === spot);
-      steps.push({ walk: it.pos }, { wait: this.cfg.cleaning_spots[spot].minutes },
+      const icon = { counter: "🧽", coffee_machine: "🧼", tables: "🧽", floor: "🧹" }[spot];
+      steps.push({ walk: it.pos }, { face: spot === "coffee_machine" ? { x: -40, z: -3.6 } : spot === "counter" ? { x: -35, z: -2.5 } : { x: it.pos.x, z: it.pos.z + 1 } },
+        { wait: this.cfg.cleaning_spots[spot].minutes, work: "clean", icon, text: this.cfg.cleaning_spots[spot].name },
         { call: () => { if (this.v.day_state === "CLOSING" && !this.v.cleaning[spot]) this.send("clean", { spot }, (r) => { if (r.ok && r.result.summary) this.openSummary(); }); } });
     }
     steps.push({ walk: w.home });
@@ -911,8 +913,9 @@ class Flow {
     const can = v.can_buy_competitor;
     this.game.ui.showDialog({
       id: "P17", icon: "🏪", title: `Competitor - ${this.shopName("rival")}`, unique: true,
-      text: can ? `The owner is willing to sell for <b>${euro(this.cfg.acquisition_cost)}</b>. The barista leaves: from tomorrow you run this café yourself ` +
-          `while your manager runs the old one. Hire a manager here too and the campus is yours.`
+      text: v.rival_sold ? "The contract is signed. The café becomes yours tomorrow morning - then you run it yourself."
+        : can ? `The owner is willing to sell for <b>${euro(this.cfg.acquisition_cost)}</b>. It becomes yours tomorrow morning: the barista leaves, ` +
+          `you run this café yourself while your manager runs the old one. Hire a manager here too and the campus is yours.`
         : `The competitor has fixed prices and a good reputation (factor ${v.shops.rival.factor.toFixed(2)}). ` +
           `Once you have hired a manager for your café, you can buy it for ${euro(this.cfg.acquisition_cost)}.`,
       rows: prices,
@@ -926,8 +929,8 @@ class Flow {
   openUpgrades() {
     const ui = this.game.ui;
     const dlg = {
-      id: "P18", icon: "🛠️", title: "Upgrades & staff",
-      text: "Upgrades make your café more attractive (utility factor). A manager serves customers on their own.",
+      id: "P18", icon: "🛠️", title: "Upgrades & staff", wide: true,
+      text: "Upgrades make your café more attractive (utility factor). A manager runs a café on his own from the next day.",
       body: (body) => {
         const v = this.v;
         for (const shop of Object.keys(v.shops)) {
@@ -979,10 +982,14 @@ class Flow {
     const v = this.v, win = v.status === "victory";
     this.game.ui.showDialog({
       id: "P19", icon: win ? "🏆" : "💸", title: win ? "Monopoly reached!" : "Bankrupt!", unique: true, noEsc: true, urgent: true,
-      text: win ? `Both cafés are yours and run with managers. You took over the campus in <b>${v.day} days</b>.`
+      text: win ? `Both cafés are yours and run with managers. You took over the campus in <b>${v.day} day${v.day === 1 ? "" : "s"}</b>.`
         : "Your cash dropped to €0.00 or below at the end of the day.",
       rows: [{ label: "Days played", value: String(v.day) }, { label: "Total profit", value: euro(v.total_profit) }],
-      primary: { label: "New game", action: () => this.game.startSession("new_game") },
+      // v6: after winning you can keep playing without a goal
+      extra: win ? [{ label: "New game", cls: "secondary", action: () => this.confirmRestart() }] : [],
+      primary: win
+        ? { label: "Keep playing (open mode)", action: () => this.send("continue_open_mode", {}, this.ok()) }
+        : { label: "New game", action: () => this.game.startSession("new_game") },
     });
   }
   openPause() {
@@ -1264,10 +1271,20 @@ class Flow {
         const items = a.wanted || [];
         const job = { sid, ready: false, sent: false };
         const steps = [];
+        const portions = v.shops[shop].portions || {};
+        const left = { ...portions };
+        const work = { coffee: ["coffee", "☕", "Making coffee"], orange_juice: ["juice", "🍊", "Pressing juice"],
+          pastel_de_nata: ["pastry", "🥧", "Taking a pastel"], tea: ["coffee", "🍵", "Making tea"], croissant: ["pastry", "🥐", "Taking a croissant"] };
         for (const p of items) {
+          // v6: sold out -> no walk to the station, the manager tells the customer right away
+          if (left[p] !== null && left[p] !== undefined) {
+            if (left[p] <= 0) continue;
+            left[p] -= 1;
+          }
           const st = this.stationOf(shop, p);
           if (st) steps.push({ walk: st }, { face: { x: st.x + (shop === "cafe" ? -3 : 0), z: st.z + (shop === "cafe" ? 0 : -3) } });
-          steps.push({ wait: Math.max(0.5, this.cfg.products[p].prep_minutes) });
+          const [kind, icon, text] = work[p] || ["coffee", "⚙️", "Preparing"];
+          steps.push({ wait: Math.max(0.5, this.cfg.products[p].prep_minutes), work: kind, icon, text });
         }
         steps.push({ walk: worker.home }, { face: a.pos }, { call: () => { job.ready = true; } });
         worker.run(steps, job);

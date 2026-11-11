@@ -79,3 +79,18 @@ Decisions that the brief left open or that came up during implementation. Change
 - Day gain next to the cash (sales + tips - purchases - spending today); click it for statistics with charts over all days (market share, sales and profit, reputation, customers, cash). The daily summary has a Charts tab too.
 - Price boards in front of both cafés ("-" until today's prices are set or the café opens); a "FOR SALE" sign at the competitor once you hired a manager.
 - After buying the competitor: no barista any more. It opens the next day and you run it yourself (plan, shop, serve) while the manager runs the first café; the day starts in front of the new shop. A manager there too means victory. Old saves with the v3/v4 barista are migrated to this rule.
+
+## v6 changes
+- Morning: no automatic planning pop-up any more; the marker leads to the planning board (manager proposals still pop up).
+- Staff animations: at a station the arms move (coffee, juice, pastry) and a tag with icon and progress bar shows what happens; the same for the four cleaning spots.
+- Customers leave through the middle of the door (lane at 0.8 m from the door centre, the door is 3 m wide) instead of along the wall.
+- FOR SALE sign: two posts behind the plate, nothing covers the letters.
+- Stuck people: someone who wants to walk but hardly moved for a second may pass through others for 2.5 s, so groups never block each other.
+- Upgrade dialog is wider and the status chips do not wrap.
+- A sold-out product: the manager does not walk to its station, he tells the customer right away.
+- Buying the competitor: you pay today, it becomes yours the next morning. Until then the old owner keeps selling (price board: "SOLD - NEW OWNER TOMORROW").
+- Objective texts: while the purchase is pending and after the takeover they say that the manager runs the first café and you run the second one.
+- As soon as a manager is hired, the player cannot clean any more: the manager cleans, already on the evening of the day he was hired.
+- After the victory: "Keep playing (open mode)" continues the game without a goal (no second victory screen).
+- The competitor's display shows croissants.
+- M opens and closes the big map.

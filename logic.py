@@ -152,6 +152,8 @@ def _start_day(state: dict, day: int) -> dict:
         "restock": None,
         "manager_proposals": {},
     })
+    if state["shops"]["rival"].get("sold") and state["shops"]["rival"]["owner"] == "bot":
+        _take_over_rival(state)
     for shop in owned_shops(state):
         data = state["shops"][shop]
         if data["manager_hired"]:
@@ -382,8 +384,19 @@ def _pay(state: dict, amount: int) -> None:
 
 
 def _check_victory(state: dict) -> None:
+    if state.get("open_mode"):
+        return  # you already won and chose to keep playing
     if all(d["owner"] == "player" and d["manager_hired"] for d in state["shops"].values()):
         state["status"] = VICTORY
+
+
+def _ev_continue_open_mode(state, ev):
+    """After the victory: keep playing without a goal (open mode)."""
+    if state["status"] != VICTORY:
+        raise GameError("Open mode starts after you have won.")
+    state["status"] = RUNNING
+    state["open_mode"] = True
+    return {"toast": "Open mode: keep running your cafés as long as you like."}
 
 
 def _student(state: dict, sid: str) -> dict:
@@ -756,14 +769,21 @@ def _ev_buy_competitor(state, ev):
         raise GameError("You already own this café.")
     if not state["shops"]["cafe"]["manager_hired"]:
         raise GameError("Hire a manager in your café first.")
+    if rival.get("sold"):
+        raise GameError("You already bought it - it becomes yours tomorrow morning.")
     _pay(state, CONFIG["acquisition_cost"])
-    # v5: the old barista leaves. The shop opens tomorrow and you run it yourself
+    # v6: the contract is signed today, the shop becomes yours tomorrow morning. Until then
+    # the old owner keeps running it. Then the barista leaves and you run it yourself
     # until you hire a manager there too.
-    rival.update({"owner": "player", "stock": [], "staff": False, "manager": False,
-                  "manager_hired": False, "opens_day": state["day"] + 1, "prices_set": False})
+    rival["sold"] = True
     state["stats"]["spending"] += CONFIG["acquisition_cost"]
-    _check_victory(state)
-    return {"toast": f"{SHOPS['rival']['name']} is yours now! It opens tomorrow - you will work there yourself."}
+    return {"toast": f"Contract signed! {SHOPS['rival']['name']} becomes yours tomorrow morning - you will work there yourself."}
+
+
+def _take_over_rival(state: dict) -> None:
+    state["shops"]["rival"].update({"owner": "player", "stock": [], "staff": False, "manager": False,
+                                    "manager_hired": False, "opens_day": state["day"], "prices_set": False,
+                                    "sold": False})
 
 
 # Students and sales -----------------------------------------------------------
@@ -1159,6 +1179,7 @@ HANDLERS = {
     "discard_tray": _ev_discard_tray,
     "cancel_order": _ev_cancel_order,
     "confirm_manager_plan": _ev_confirm_manager_plan,
+    "continue_open_mode": _ev_continue_open_mode,
 }
 
 
@@ -1168,7 +1189,7 @@ def apply(state: dict, event: dict) -> tuple[dict, dict]:
     kind = event.get("type")
     if kind not in HANDLERS:
         raise GameError(f"Unknown event: {kind}.")
-    if state["status"] != RUNNING:
+    if state["status"] != RUNNING and not (kind == "continue_open_mode" and state["status"] == VICTORY):
         raise GameError("The game is over.")
     new = copy.deepcopy(state)
     if "t" in event:
@@ -1208,10 +1229,15 @@ def objective(state: dict) -> str:
     ds = state["day_state"]
     ws = work_shop(state)
     if ws is None and ds not in (CLOSING, DAY_SUMMARY):
-        if state["shops"]["rival"]["owner"] == "bot":
+        rival = state["shops"]["rival"]
+        if rival.get("sold"):
+            return f"Your manager runs the café. Tomorrow you start in {SHOPS['rival']['name']}."
+        if rival["owner"] == "bot":
             return "Your manager runs the café. Save up and buy the competitor (upgrade board)."
+        if not rival["manager_hired"]:
+            return f"Your manager runs the café - you run {SHOPS['rival']['name']}."
         return "Your managers run both cafés."
-    if ds == CLOSING and state["shops"]["cafe"]["manager"]:
+    if ds == CLOSING and state["shops"]["cafe"]["manager_hired"]:
         done = sum(state["cleaning"].values())
         return f"Your manager cleans the café ({done}/{len(state['cleaning'])})."
     if ws == "rival" and ds in (MORNING_PLANNING, WALK_TO_CAFE, SET_PRICES, SHOP_OPEN):
@@ -1280,7 +1306,10 @@ def view(state: dict) -> dict:
         "restock": state.get("restock"),
         "yesterday": state["history"][-1] if state["history"] else None,
         "total_profit": state["total_profit"],
-        "can_buy_competitor": state["shops"]["rival"]["owner"] == "bot" and state["shops"]["cafe"]["manager_hired"],
+        "can_buy_competitor": (state["shops"]["rival"]["owner"] == "bot" and not state["shops"]["rival"].get("sold")
+                               and state["shops"]["cafe"]["manager_hired"]),
+        "rival_sold": bool(state["shops"]["rival"].get("sold")),
+        "open_mode": bool(state.get("open_mode")),
         "students": {
             sid: {"name": s["name"], "status": s["status"], "intent": s["intent"],
                   "traits": s["traits"], "look": s["look"]}
