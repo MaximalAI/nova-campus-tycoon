@@ -296,6 +296,7 @@ def _manager_buys(state: dict, shop: str, plan: dict | None = None, prices: dict
     state["shops"][shop]["prices"].update(proposal["prices"])
     state["shops"][shop]["prices_set"] = True
     proposal.update({"done": True, "bought": bought, "paid": cost})
+    mechanics.of(shop).manager_fill(state)
     return {"toast": f"Manager of {SHOPS[shop]['name']} bought supplies for {euro(cost)}", "bought": bought, "cost": cost}
 
 
@@ -535,9 +536,12 @@ def shopping_list(state: dict, plan: dict[str, int], shop: str | None = None) ->
     """Wholesale units needed: planned portions minus usable stock, rounded up to packs.
 
     Only the stock of ``shop`` counts (default: the shop the player runs today)."""
-    shop = shop or work_shop(state) or "cafe"
+    shop = shop or work_shop(state) or SHOP_ORDER[0]
     need: dict[str, int] = {}
+    front = mechanics.of(shop).front_products()
     for product, portions in plan.items():
+        if product in front and state["shops"][shop]["owner"] == "player":
+            portions = max(0, portions - front_units(state, shop, product))  # already in the machine / on the shelf
         for item, qty in PRODUCTS[product]["uses"].items():
             need[item] = need.get(item, 0) + portions * qty
     result = {}
@@ -1360,6 +1364,56 @@ def _ev_resume(state, ev):
     return {}
 
 
+# v7: mechanics -----------------------------------------------------------------
+
+
+def _ev_fill_front(state, ev):
+    """Fill machines, shelves or a display from the storage (P25, P28, P33)."""
+    shop = ev.get("shop")
+    _require_owned(state, shop)
+    mech = mechanics.of(shop)
+    if not mech.front_products():
+        raise GameError("This shop has nothing to fill.")
+    if mech.front_fill == "before" and state["time"] >= mech.p["fill_until"] - 1e-6:
+        raise GameError(f"The shelves can only be filled in the morning, before {int(mech.p['fill_until']):02d}:00.")
+    if state["closed"]:
+        raise GameError("The shop is closed for today.")
+    amounts = ev.get("amounts")
+    if amounts is not None:
+        for product, n in amounts.items():
+            if product not in mech.front_products():
+                raise GameError(f"{product} is not sold here.")
+            _whole(n, "The amount")
+    moved = fill_front(state, shop, amounts)
+    if not moved:
+        raise GameError("Nothing to fill: the storage is empty or there is no room left.")
+    names = ", ".join(f"{n}x {PRODUCTS[p]['name']}" for p, n in moved.items())
+    return {"toast": f"Filled: {names}", "moved": moved}
+
+
+def _ev_repair(state, ev):
+    """Repair a broken vending machine for a fee (P26)."""
+    shop, product = ev.get("shop"), ev.get("product")
+    _require_owned(state, shop)
+    mech = mechanics.of(shop)
+    if not hasattr(mech, "repair"):
+        raise GameError("Nothing to repair here.")
+    cost = mech.repair(state, product)
+    return {"toast": f"Machine repaired for {euro(cost)}"}
+
+
+def _ev_checkout(state, ev):
+    """Scan the shopping of the customer at the register (P09 in a self-service shop)."""
+    shop = ev.get("shop")
+    if mechanics.of(shop).service != "checkout":
+        raise GameError("This shop has no checkout.")
+    _ev_accept(state, ev)
+    for product in list(state["current_order"]["items"]):
+        _consume(state, shop, product)
+        state["tray"].append(product)
+    return _ev_handover(state, ev)
+
+
 HANDLERS = {
     "resume": _ev_resume,
     "confirm_plan": _ev_confirm_plan,
@@ -1393,6 +1447,9 @@ HANDLERS = {
     "cancel_order": _ev_cancel_order,
     "confirm_manager_plan": _ev_confirm_manager_plan,
     "continue_open_mode": _ev_continue_open_mode,
+    "fill_front": _ev_fill_front,
+    "repair": _ev_repair,
+    "checkout": _ev_checkout,
 }
 
 
@@ -1457,6 +1514,9 @@ def objective(state: dict) -> str:
     if ds == CLOSING and state["shops"]["cafe"]["manager_hired"]:
         done = sum(state["cleaning"].values())
         return f"Your manager cleans the café ({done}/{len(state['cleaning'])})."
+    special = mechanics.of(ws).objective(state, ds) if ws else None
+    if special and ds in (SET_PRICES, SHOP_OPEN):
+        return special
     if ws and SHOPS[ws]["start_owner"] != "player" and ds in (MORNING_PLANNING, WALK_TO_CAFE, SET_PRICES, SHOP_OPEN):
         text = OBJECTIVES[WALK_TO_CAFE if ds == WALK_TO_WHOLESALE and state["bag"] else ds]
         return text.replace("in your café", f"for {SHOPS[ws]['name']}").replace("your café", SHOPS[ws]["name"])
@@ -1496,6 +1556,8 @@ def view(state: dict) -> dict:
             "front": {p: front_units(state, s, p) for p in mechanics.of(s).front_products()},
             "front_room": {p: front_room(state, s, p) for p in mechanics.of(s).front_products()},
             "mech": mechanics.of(s).view(state),
+            "service": mechanics.of(s).service,
+            "staffed": mechanics.of(s).staffed,
         }
     return {
         "day": state["day"],

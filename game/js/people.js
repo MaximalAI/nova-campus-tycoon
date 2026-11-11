@@ -1,41 +1,56 @@
 // ---------------------------------------------------------------------------
 // People: low-poly figures with a walking animation, player control, students
 // ---------------------------------------------------------------------------
+// v7: up to 60 people on the map - geometries and materials are shared between figures,
+// and only the big parts (legs, body, head) cast a shadow.
+const FIG_GEO = new Map(), FIG_MAT = new Map();
+function figGeo(kind, ...args) {
+  const key = kind + args.join(",");
+  if (!FIG_GEO.has(key)) FIG_GEO.set(key, new THREE[kind](...args));
+  return FIG_GEO.get(key);
+}
+function figMat(c) {
+  if (!FIG_MAT.has(c)) FIG_MAT.set(c, new THREE.MeshLambertMaterial({ color: c }));
+  return FIG_MAT.get(c);
+}
 class Figure {
   constructor(scene, colors, opts = {}) {
-    const mat = (c) => new THREE.MeshLambertMaterial({ color: c });
     const g = new THREE.Group();
     const s = opts.scale || 1;
     const part = (geo, color, x, y, z, parent = g) => {
-      const m = new THREE.Mesh(geo, mat(color)); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m;
+      const m = new THREE.Mesh(geo, figMat(color)); m.position.set(x, y, z);
+      const p = geo.parameters;
+      m.castShadow = !p.width || p.width * p.height > 0.06; // no shadows for eyes, hands and feet
+      parent.add(m); return m;
     };
+    const Box = (...a) => figGeo("BoxGeometry", ...a), Sphere = (...a) => figGeo("SphereGeometry", ...a), Cyl = (...a) => figGeo("CylinderGeometry", ...a);
     this.legL = new THREE.Group(); this.legR = new THREE.Group();
     this.legL.position.set(-0.13, 0.72, 0); this.legR.position.set(0.13, 0.72, 0);
-    part(new THREE.BoxGeometry(0.2, 0.72, 0.22), colors.pants, 0, -0.36, 0, this.legL);
-    part(new THREE.BoxGeometry(0.2, 0.72, 0.22), colors.pants, 0, -0.36, 0, this.legR);
-    part(new THREE.BoxGeometry(0.22, 0.1, 0.3), 0x222222, 0, -0.72, 0.04, this.legL);
-    part(new THREE.BoxGeometry(0.22, 0.1, 0.3), 0x222222, 0, -0.72, 0.04, this.legR);
+    part(Box(0.2, 0.72, 0.22), colors.pants, 0, -0.36, 0, this.legL);
+    part(Box(0.2, 0.72, 0.22), colors.pants, 0, -0.36, 0, this.legR);
+    part(Box(0.22, 0.1, 0.3), 0x222222, 0, -0.72, 0.04, this.legL);
+    part(Box(0.22, 0.1, 0.3), 0x222222, 0, -0.72, 0.04, this.legR);
     g.add(this.legL, this.legR);
-    part(new THREE.BoxGeometry(0.52, 0.62, 0.3), colors.shirt, 0, 1.03, 0);
-    if (opts.apron) part(new THREE.BoxGeometry(0.44, 0.7, 0.04), 0xffffff, 0, 0.95, 0.17);
+    part(Box(0.52, 0.62, 0.3), colors.shirt, 0, 1.03, 0);
+    if (opts.apron) part(Box(0.44, 0.7, 0.04), 0xffffff, 0, 0.95, 0.17);
     this.armL = new THREE.Group(); this.armR = new THREE.Group();
     this.armL.position.set(-0.34, 1.3, 0); this.armR.position.set(0.34, 1.3, 0);
-    part(new THREE.BoxGeometry(0.15, 0.58, 0.17), colors.shirt, 0, -0.27, 0, this.armL);
-    part(new THREE.BoxGeometry(0.15, 0.58, 0.17), colors.shirt, 0, -0.27, 0, this.armR);
-    part(new THREE.BoxGeometry(0.13, 0.12, 0.13), colors.skin, 0, -0.6, 0, this.armL);
-    part(new THREE.BoxGeometry(0.13, 0.12, 0.13), colors.skin, 0, -0.6, 0, this.armR);
+    part(Box(0.15, 0.58, 0.17), colors.shirt, 0, -0.27, 0, this.armL);
+    part(Box(0.15, 0.58, 0.17), colors.shirt, 0, -0.27, 0, this.armR);
+    part(Box(0.13, 0.12, 0.13), colors.skin, 0, -0.6, 0, this.armL);
+    part(Box(0.13, 0.12, 0.13), colors.skin, 0, -0.6, 0, this.armR);
     g.add(this.armL, this.armR);
-    part(new THREE.SphereGeometry(0.22, 14, 12), colors.skin, 0, 1.57, 0);
-    const hair = part(new THREE.SphereGeometry(0.235, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), colors.hair, 0, 1.6, -0.01);
+    part(Sphere(0.22, 14, 12), colors.skin, 0, 1.57, 0);
+    const hair = part(Sphere(0.235, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), colors.hair, 0, 1.6, -0.01);
     if (opts.cap) {
-      part(new THREE.CylinderGeometry(0.25, 0.25, 0.1, 14), opts.cap, 0, 1.76, 0);
-      part(new THREE.BoxGeometry(0.3, 0.04, 0.2), opts.cap, 0, 1.72, 0.2);
+      part(Cyl(0.25, 0.25, 0.1, 14), opts.cap, 0, 1.76, 0);
+      part(Box(0.3, 0.04, 0.2), opts.cap, 0, 1.72, 0.2);
     }
     // eyes
-    part(new THREE.BoxGeometry(0.04, 0.05, 0.02), 0x111111, -0.08, 1.6, 0.2);
-    part(new THREE.BoxGeometry(0.04, 0.05, 0.02), 0x111111, 0.08, 1.6, 0.2);
-    const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.38, 16),
-      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
+    part(Box(0.04, 0.05, 0.02), 0x111111, -0.08, 1.6, 0.2);
+    part(Box(0.04, 0.05, 0.02), 0x111111, 0.08, 1.6, 0.2);
+    if (!FIG_MAT.has("blob")) FIG_MAT.set("blob", new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
+    const shadow = new THREE.Mesh(figGeo("CircleGeometry", 0.38, 16), FIG_MAT.get("blob"));
     shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.04; g.add(shadow);
     g.scale.setScalar(s);
     this.group = g;

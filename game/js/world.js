@@ -51,7 +51,7 @@ function genericPoints(b, spec) {
     doorOut: f.at(-1.6, 0), doorIn: f.at(1.4, 0), queue, outside,
     counterZone: f.rect(cd + 0.45, D, -W / 2, W / 2),
     cam: { x: cam.x, y: 4.6, z: cam.z, lx: f.door.x, ly: 0.6, lz: f.door.z },
-    staff: f.at(cd + 1.4, 0.6), register: f.at(cd + 0.9, 0.6), serve: f.at(cd + 1.4, 0),
+    staff: f.at(cd + 1.4, 0.6), register: vending ? f.at(2.0, -(W / 2 - 2.2)) : f.at(cd + 0.9, 0.6), serve: f.at(cd + 1.4, 0),
     storage: vending ? f.at(D - 2.8, W / 2 - 0.9) : f.at(D - 1.0, W / 2 - 1.8),
     spawn: f.at(-4.5, 2.6),
     exit: [f.at(first - 0.1, -1.2), f.at(1.6, -1.0), f.at(0, -0.8), f.at(-1.8, -0.9)],
@@ -726,6 +726,22 @@ class World {
     }
   }
 
+  // v7: status lights of the vending machines and goods on the market shelves
+  updateMechanics(view) {
+    for (const [k, mat] of Object.entries(this.machineLights || {})) {
+      const [shop, product] = k.split(":"), s = view.shops[shop];
+      const mine = s.owner === "player";
+      const color = mine && s.mech.broken && s.mech.broken[product] ? 0xe74c3c : mine && !(s.front[product] > 0) ? 0xf1c40f : 0x2ecc71;
+      if (mat.color.getHex() !== color) mat.color.setHex(color);
+    }
+    for (const [shop, shelves] of Object.entries(this.marketShelves || {})) {
+      const s = view.shops[shop];
+      for (const { product, goods } of shelves) {
+        const n = s.owner === "bot" ? goods.length : Math.min(goods.length, Math.ceil((s.front[product] || 0) / 5));
+        goods.forEach((m, i) => { m.visible = i < n; });
+      }
+    }
+  }
   keepOutOfWalls(pos, radius) { resolveCollisions(pos, radius, this.colliders); }
   // v7: zones that are not open yet are hidden on the maps (beach)
   zoneVisible(zone) { return !zone || zone === "campus" || !!(this.game.view && this.game.view.zones_open.includes(zone)); }

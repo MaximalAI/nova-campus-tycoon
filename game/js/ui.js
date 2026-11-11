@@ -109,7 +109,11 @@ class UI {
     const cfg = this.game.config;
     let html = "";
     const owned = Object.keys(v.shops).filter((s) => v.shops[s].owner === "player");
+    // v7: with many shops, the ones run by a manager are shown in one compact line
+    const managed = owned.length > 2 ? owned.filter((s) => v.shops[s].manager) : [];
+    if (managed.length) html += `<div class="stock-shop">🧑‍🍳 Managers run: ${managed.map((s) => cfg.shops[s].icon || "🏪").join(" ")}</div>`;
     for (const s of owned) {
+      if (managed.includes(s)) continue;
       const portions = v.shops[s].portions || {};
       if (owned.length > 1) html += `<div class="stock-shop">${esc(cfg.shops[s].name)}${v.shops[s].manager ? " (manager)" : s === v.work_shop ? " (you)" : ""}</div>`;
       html += `<div class="stock-row">` + Object.entries(portions).map(([p, n]) => {
@@ -200,6 +204,7 @@ class UI {
     this.game.focus();
   }
   refreshDialog() { if (this.current) this.renderDialog(); }
+  dialogBody() { return this.$("#dialog .dlg-body"); }
   renderDialog() {
     const d = this.current;
     const box = this.$("#dialog");

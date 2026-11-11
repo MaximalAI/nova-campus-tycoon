@@ -11,6 +11,7 @@ from __future__ import annotations
 import heapq
 
 import logic
+import mechanics
 import students as st
 import timeclock
 from config import CONFIG
@@ -41,7 +42,7 @@ def simulate_day(state: dict, speed: int = 1, real_step: float = 0.25, serve_pla
             return None
         return result
 
-    for mark in (T["open"], T["last_customer"], T["close"], T["day_end"]):
+    for mark in T["ticks"]:
         if mark >= state["time"]:
             at(mark, "tick")
     for sid, plan in state["schedule"].items():
@@ -79,6 +80,11 @@ def simulate_day(state: dict, speed: int = 1, real_step: float = 0.25, serve_pla
             queues[shop].remove(sid)
             handle_decision(sid, res.get("decision"))
             next_customer(shop)
+            return
+        if mechanics.of(shop).service == "checkout":
+            busy[shop] = True
+            minutes = mechanics.of(shop).p["scan_minutes"] * len(res["items"])
+            at(current + minutes / 60, "checkout_done", sid=sid, shop=shop)
             return
         res = send({"type": "accept", "shop": shop, "student": sid, "player_inside": True})
         if res is None:
@@ -120,7 +126,7 @@ def simulate_day(state: dict, speed: int = 1, real_step: float = 0.25, serve_pla
                 if student["status"] != st.WALKING_TO_SHOP or student["intent"]["shop"] != data["shop"]:
                     continue
                 shop = data["shop"]
-                if len(queues[shop]) >= CONFIG["max_queue"]:
+                if len(queues[shop]) >= CONFIG["shops"][shop]["max_queue"]:
                     handle_decision(sid, send({"type": "queue_full", "student": sid, "shop": shop}))
                     continue
                 res = send({"type": "join_queue", "student": sid, "shop": shop})
@@ -142,6 +148,13 @@ def simulate_day(state: dict, speed: int = 1, real_step: float = 0.25, serve_pla
                 if sid in queues[shop]:
                     queues[shop].remove(sid)
                     send({"type": "auto_serve", "student": sid, "shop": shop})
+                next_customer(shop)
+            elif kind == "checkout_done":
+                shop = data["shop"]
+                busy[shop] = False
+                if sid in queues[shop]:
+                    queues[shop].remove(sid)
+                    send({"type": "checkout", "shop": shop, "student": sid, "player_inside": True})
                 next_customer(shop)
             elif kind == "manual_done":
                 shop = data["shop"]

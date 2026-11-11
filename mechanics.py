@@ -25,6 +25,8 @@ Hooks (all optional for a mechanic):
 
 from __future__ import annotations
 
+import random
+
 from config import CONFIG
 
 
@@ -95,20 +97,110 @@ class Mechanic:
     def view(self, state: dict) -> dict:
         return {}
 
+    def objective(self, state: dict, day_state: str) -> str | None:
+        """A text for the HUD objective when the player runs this shop (None: the default)."""
+        return self.p.get("objectives", {}).get(day_state)
+
 
 class Counter(Mechanic):
     """v1 to v6: order at the counter, prepare at the stations, hand over."""
 
 
+def _rng(state: dict, *parts) -> random.Random:
+    return random.Random("-".join(str(p) for p in (state["seed"], state["day"], *parts)))
+
+
 class Vending(Mechanic):
-    """SnackBots: machines instead of staff. Customers take the products themselves."""
+    """SnackBots: machines instead of staff (brief 14.3).
+
+    No prep time and nobody serves: a student takes the product if the machine has it.
+    The player refills the machines from the storage. During opening hours a machine
+    can break down (chance per game hour); a broken machine sells nothing until it is
+    repaired for a fee. A working manager refills and repairs automatically."""
 
     staffed = False
+    front_fill = "anytime"
+
+    def front_products(self) -> set[str]:
+        return set(CONFIG["shops"][self.shop]["products"])
+
+    def front_capacity(self, product: str) -> int | None:
+        return self.p["capacity"]
+
+    def broken(self, state: dict) -> dict:
+        return self.data(state).setdefault("broken", {})
+
+    def available(self, state: dict, product: str) -> bool:
+        return not self.broken(state).get(product)
+
+    def repair(self, state: dict, product: str) -> int:
+        import logic
+
+        if not self.broken(state).get(product):
+            raise logic.GameError("This machine works.")
+        cost = self.p["repair_cost"]
+        logic._pay(state, cost)
+        state["stats"]["spending"] += cost
+        self.broken(state)[product] = False
+        return cost
+
+    def start_day(self, state: dict) -> None:
+        self.data(state)["last_hour"] = int(CONFIG["time"]["open"])
+
+    def tick(self, state: dict) -> list[str]:
+        """Breakdowns: one roll per machine for every full opening hour that passed."""
+        if not self.owned(state) or not state["open"]:
+            return []
+        d = self.data(state)
+        last = d.get("last_hour", int(CONFIG["time"]["open"]))
+        now = min(int(state["time"] + 1e-6), int(CONFIG["time"]["close"]))
+        toasts = []
+        for hour in range(last, now):
+            for product in CONFIG["shops"][self.shop]["products"]:
+                if self.broken(state).get(product):
+                    continue
+                if _rng(state, self.shop, product, hour).random() < self.p["breakdown_per_hour"]:
+                    self.broken(state)[product] = True
+                    toasts.append(f"Machine broken: {CONFIG['products'][product]['name']}")
+        d["last_hour"] = max(last, now)
+        if state["shops"][self.shop]["manager"]:
+            for product, is_broken in list(self.broken(state).items()):
+                if is_broken and state["money"] >= self.p["repair_cost"]:
+                    self.repair(state, product)
+                    toasts.append(f"Manager repaired the {CONFIG['products'][product]['name']} machine")
+        return toasts
+
+    def view(self, state: dict) -> dict:
+        return {"broken": dict(self.broken(state)), "repair_cost": self.p["repair_cost"],
+                "capacity": self.p["capacity"]}
+
+
+class Shelves(Mechanic):
+    """Mercado & Go: limited shelf space (brief 14.3).
+
+    The shelves hold a fixed number of items in total. In the morning the player decides
+    how many of each product go on the shelves (sandwiches are made while stocking:
+    one bread and two slices of cheese each). Students only buy what is on the shelves
+    and pay at the register."""
+
+    service = "checkout"
+    front_fill = "before"
+
+    def front_products(self) -> set[str]:
+        return set(CONFIG["shops"][self.shop]["products"])
+
+    def front_total_capacity(self) -> int | None:
+        return self.p["capacity"]
+
+    def view(self, state: dict) -> dict:
+        return {"capacity": self.p["capacity"], "fill_until": self.p["fill_until"],
+                "scan_minutes": self.p["scan_minutes"]}
 
 
 MECHANICS: dict[str, type[Mechanic]] = {
     "counter": Counter,
     "vending": Vending,
+    "shelves": Shelves,
 }
 
 _cache: dict[str, Mechanic] = {}

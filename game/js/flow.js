@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
 // Flow: guided daily loop, pop-up catalog P00-P20, students, queues, triggers
 // ---------------------------------------------------------------------------
-const TICKS = [7.0, 8.0, 19.75, 20.0, 21.0];
+// v7: the tick times come from the config (mechanics run on every tick)
+let TICKS = [7.0, 8.0, 19.75, 20.0, 21.0];
 
 class Flow {
   constructor(game) {
@@ -17,7 +18,7 @@ class Flow {
     this.wasInWholesale = false;
   }
 
-  get v() { return this.game.view; }
+  get v() { if (this.game.config && this.game.config.time.ticks) TICKS = this.game.config.time.ticks; return this.game.view; }
   get cfg() { return this.game.config; }
   send(type, payload, cb) { return this.game.bridge.send(type, payload, cb); }
   ok(cb) { return (r) => { if (r.ok) { if (r.result && r.result.toast) this.game.ui.toast(r.result.toast); if (cb) cb(r.result); } else this.game.ui.toast(r.error, true); }; }
@@ -499,7 +500,28 @@ class Flow {
           this.leaveShop(a, shop, r.ok ? r.result : { action: "wander" });
         });
       } },
-      primary: { label: "Accept", action: () => {
+      primary: this.v.shops[shop].service === "checkout" ? { label: "Scan & sell", action: () => {
+        // v7: self-service shop: the customer brings the products, you scan them
+        dlg.decided = true;
+        a.mode = "served";
+        let bar2 = null;
+        const pb = el("div", "progress"); bar2 = el("div"); pb.appendChild(bar2);
+        this.game.ui.dialogBody().appendChild(pb);
+        this.game.ui.primaryButton.disabled = true;
+        dlg.busy = true;
+        this.progress = { minutes: this.v.shops[shop].mech.scan_minutes * Math.max(1, items.length), done: 0, bar: () => bar2, onDone: () => {
+          dlg.busy = false;
+          this.send("checkout", { shop, student: sid, player_inside: this.playerIn(shop) }, (r) => {
+            this.p09For = null;
+            this.removeFromQueue(shop, sid);
+            if (r.ok) { this.game.ui.toast(r.result.toast); this.repToast(r.result.rep_delta, "fast service"); a.emote = { icon: "😊", until: performance.now() + 3000 }; }
+            else this.game.ui.toast(r.error, true);
+            this.exitShop(a, shop);
+          });
+          this.game.ui.closeDialog();
+        } };
+        return "keep";
+      } } : { label: "Accept", action: () => {
         dlg.decided = true;
         a.mode = "served"; // optimistic, so the dialog does not open again while Python answers
         this.send("accept", { shop, student: sid, player_inside: this.playerIn(shop) }, (r) => {
@@ -1304,7 +1326,8 @@ class Flow {
           }
           const st = this.stationOf(shop, p);
           if (st) steps.push({ walk: st }, { face: this.stationFace(shop, st) });
-          const [kind, icon, text] = work[p] || ["coffee", this.cfg.products[p].icon, `Preparing: ${this.cfg.products[p].name}`];
+          const [kind, icon, text] = work[p] || (v.shops[shop].service === "checkout" ? ["pastry", "🧾", "Scanning"]
+            : ["coffee", this.cfg.products[p].icon, `Preparing: ${this.cfg.products[p].name}`]);
           steps.push({ wait: Math.max(0.5, this.cfg.products[p].prep_minutes), work: kind, icon, text });
         }
         steps.push({ walk: worker.home }, { face: a.pos }, { call: () => { job.ready = true; } });
@@ -1404,12 +1427,110 @@ class Flow {
       primary: { label: "Close" },
     });
   }
-  // filled in by the mechanics of the new shops (vending machines, shelves, office)
-  machineLabel() { return null; }
-  useMachine() {}
-  shelfLabel() { return null; }
-  openShelves() {}
-  openOffice() { this.openUpgrades(); }
+  // ------------------------------------------------ v7 SnackBots: P25 refill, P26 broken, P27 office
+  machineLabel(shop, product) {
+    const v = this.v;
+    if (!v || v.shops[shop].owner !== "player") return null;
+    const m = v.shops[shop].mech, name = this.cfg.products[product].name;
+    if (m.broken && m.broken[product]) return `Repair: ${name} machine`;
+    return `Refill: ${name} (${v.shops[shop].front[product] || 0}/${m.capacity})`;
+  }
+  useMachine(shop, product) {
+    const v = this.v, m = v.shops[shop].mech;
+    if (m.broken && m.broken[product]) return this.openBroken(shop, product);
+    return this.openRefill(shop, product);
+  }
+  storageFor(shop, product) {
+    // portions the storage can still make of a product
+    const s = this.v.shops[shop].stock;
+    return Math.min(...Object.entries(this.cfg.products[product].uses).map(([i, q]) => Math.floor((s[i] ? s[i].units : 0) / q)));
+  }
+  openRefill(shop, product) {
+    const v = this.v, spec = this.cfg.products[product], m = v.shops[shop].mech;
+    const inMachine = v.shops[shop].front[product] || 0, room = v.shops[shop].front_room[product] || 0;
+    const store = this.storageFor(shop, product);
+    const others = this.cfg.shops[shop].products.filter((p) => p !== product && (v.shops[shop].front_room[p] || 0) > 0 && this.storageFor(shop, p) > 0);
+    this.game.ui.showDialog({
+      id: "P25", icon: spec.icon, title: `Refill: ${spec.name} machine`, unique: true,
+      text: "Students take what is in the machine - nobody has to serve. Refill it from your storage.",
+      rows: [{ label: "In the machine", value: `${inMachine} / ${m.capacity}` }, { label: "In your storage", value: String(store) }],
+      extra: others.length ? [{ label: "Refill all machines", cls: "secondary", action: () => { this.game.ui.closeDialog(); this.send("fill_front", { shop }, this.ok()); } }] : [],
+      secondary: { label: "Cancel" },
+      primary: { label: `Refill ${Math.min(room, store)}`, disabled: !Math.min(room, store),
+        action: () => this.send("fill_front", { shop, amounts: { [product]: Math.min(room, store) } }, this.ok()) },
+    });
+  }
+  openBroken(shop, product) {
+    const v = this.v, spec = this.cfg.products[product], cost = v.shops[shop].mech.repair_cost;
+    this.game.ui.showDialog({
+      id: "P26", icon: "🛠️", title: `Machine broken: ${spec.name}`, unique: true,
+      text: `The ${esc(spec.name)} machine is out of order. Until it is repaired, nobody can buy ${esc(spec.name)} here.`,
+      rows: [{ label: "Repair fee", value: euro(cost) }, { label: "In the machine", value: String(v.shops[shop].front[product] || 0) }],
+      secondary: { label: "Later" },
+      primary: { label: `Repair for ${euro(cost)}`, disabled: v.money < cost,
+        action: () => this.send("repair", { shop, product }, this.ok()) },
+    });
+  }
+  openOffice(shop) {
+    const v = this.v, s = v.shops[shop];
+    if (s.owner !== "player") return this.openCompetitor(shop);
+    const cost = this.cfg.shops[shop].manager_cost;
+    const who = s.manager ? "Your manager refills the machines and repairs breakdowns." : s.manager_hired ? "Your manager starts tomorrow morning."
+      : `A manager of the vending company refills the machines and repairs breakdowns for you, so you are free for the next shop. ${euro(cost)}.`;
+    this.game.ui.showDialog({
+      id: "P27", icon: "🏢", title: "Vending company office", unique: true, text: who,
+      rows: this.cfg.shops[shop].products.map((p) => ({ label: `${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}`, value: euro(s.prices[p]) })),
+      extra: [
+        ...(this.canSetPrices(shop) ? [{ label: "Set prices", cls: "secondary", action: () => { this.game.ui.closeDialog(); this.openPrices(shop); } }] : []),
+        { label: "Upgrades", cls: "secondary", action: () => { this.game.ui.closeDialog(); this.openUpgrades(); } },
+      ],
+      primary: s.manager_hired ? { label: "Close" } : { label: `Hire manager (${euro(cost)})`, disabled: v.money < cost,
+        action: () => this.send("hire_manager", { shop }, this.ok(() => this.checkEnd())) },
+    });
+  }
+
+  // --------------------------------------------------------- v7 Mercado & Go: P28 shelves
+  shelfLabel(shop) {
+    const v = this.v;
+    if (!v || v.shops[shop].owner !== "player" || v.shops[shop].manager) return null;
+    return this.game.clock.t < v.shops[shop].mech.fill_until && !v.closed ? "Stock the shelves" : null;
+  }
+  openShelves(shop) {
+    const v = this.v, ui = this.game.ui, s = v.shops[shop], cap = s.mech.capacity;
+    const products = this.cfg.shops[shop].products;
+    const add = Object.fromEntries(products.map((p) => [p, 0]));
+    const used = () => products.reduce((a, p) => a + (s.front[p] || 0) + add[p], 0);
+    ui.showDialog({
+      id: "P28", icon: "🛒", title: "Stock the shelves", wide: true,
+      text: `The shelves hold <b>${cap}</b> items in total. Decide what goes on them today - students only buy what they see. ` +
+        `Sandwiches are made now (one roll, two slices of cheese). Possible until ${fmtTime(s.mech.fill_until)}.`,
+      body: (body) => {
+        const draw = () => {
+          body.innerHTML = "";
+          for (const p of products) {
+            const line = el("div", "line");
+            const max = this.storageFor(shop, p);
+            line.appendChild(el("div", "lbl", `<span class="ic">${this.cfg.products[p].icon}</span><div>${esc(this.cfg.products[p].name)}` +
+              `<div class="sub">on the shelf: ${s.front[p] || 0} · storage makes ${max}</div></div>`));
+            const stp = el("div", "stepper");
+            const minus = el("button", "", "−"), plus = el("button", "", "+"), val = el("span", "", `+${add[p]}`);
+            minus.onclick = () => { add[p] = Math.max(0, add[p] - 5); draw(); };
+            plus.onclick = () => { add[p] = Math.min(max, add[p] + 5, add[p] + cap - used()); draw(); };
+            stp.append(minus, val, plus); line.appendChild(stp); body.appendChild(line);
+          }
+          const u = used();
+          body.appendChild(el("div", "note", `<b>Shelf space: ${u} / ${cap}</b>` + (u >= cap ? " · full" : "")));
+        };
+        draw();
+      },
+      secondary: { label: "Cancel" },
+      primary: { label: "Fill shelves", action: () => {
+        const amounts = Object.fromEntries(Object.entries(add).filter(([, n]) => n > 0));
+        if (!Object.keys(amounts).length) return;
+        this.send("fill_front", { shop, amounts }, this.ok());
+      } },
+    });
+  }
 
   // ----------------------------------------------- v7 aisle at the wholesaler (P04 per item)
   openAisle(shop) {

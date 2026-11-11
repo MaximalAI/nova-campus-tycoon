@@ -78,6 +78,7 @@ class Game {
     const loop = () => { this.frame(); requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
     window.__nct = this; // for automated play-testing
+    window.__nctP = P;
   }
 
   focus() { try { this.root.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
@@ -487,6 +488,7 @@ class Game {
     }
     this.currentHint = it && !this.ui.dialogOpen ? it : null;
     w.updateShelves(v);
+    w.updateMechanics(v);
     // Roof colour shows the owner: green = yours, otherwise the shop's own colour
     for (const key of Object.keys(this.config.shops)) {
       if (key === "cafe" || !w.buildingParts[key]) continue;
