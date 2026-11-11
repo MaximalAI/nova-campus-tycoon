@@ -101,10 +101,9 @@ class Game {
     const box = this.root.querySelector("#bigmap");
     box.classList.remove("hidden");
     this.releasePointer();
-    const R = this.bigMapR();
-    this.drawMap(this.root.querySelector("#bigmap-canvas").getContext("2d"), 560, R, false);
+    const R = this.bigMapR(), C = this.bigMapCenter();
+    this.drawMap(this.root.querySelector("#bigmap-canvas").getContext("2d"), 560, R, false, C);
     const spots = this.root.querySelector("#bigmap-spots");
-    const pct = (c) => `${((c + R) / (2 * R)) * 100}%`;
     const v = this.view;
     const places = [{ key: "wholesale", label: "🏬 Wholesaler", color: "#2c6fbb", at: { x: 40, z: 12.5 } }];
     for (const [key, spec] of Object.entries(this.config.shops)) {
@@ -114,13 +113,27 @@ class Game {
       const name = key === "cafe" ? "Your café" : spec.name;
       const tag = mine && key !== "cafe" ? " (yours)" : s.sold ? " (yours tomorrow)" : v.for_sale === key ? " (for sale)" : "";
       // labels below the building, or above it for the shops north of the main path
-      const at = { x: (b.x0 + b.x1) / 2, z: b.z1 < -10 ? b.z0 - 2.8 : b.z1 + 2.8 };
+      // labels below the building; north of the main path and at the beach above it
+      const above = b.z1 < -10 || b.zone === "beach";
+      const at = { x: (b.x0 + b.x1) / 2, z: above ? b.z0 - 2.8 : b.z1 + 2.8 };
       places.push({ key, label: `${spec.icon || "🏪"} ${name}${tag}`, color: mine ? "#2e8b57" : "#c0392b", at });
     }
     const block = this.teleportBlock();
-    spots.innerHTML = places.map((p) => `<div class="map-spot ${block ? "off" : ""}" data-go="${p.key}" style="left:${pct(p.at.x)};top:${pct(p.at.z)};background:${p.color}" title="${block || "Go there"}">${p.label}</div>`).join("");
+    // v7: many shops - push labels apart so they never cover each other (pixels of a 560 px map)
+    const px = (c, o) => ((c - o + R) / (2 * R)) * 560;
+    const boxes = places.map((p) => ({ p, x: px(p.at.x, C.x), y: px(p.at.z, C.z), w: p.label.length * 7.2 + 26 }));
+    boxes.sort((a, b) => a.y - b.y);
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = 0; j < i; j++) {
+        const a = boxes[j], b = boxes[i];
+        if (Math.abs(a.x - b.x) < (a.w + b.w) / 2 && Math.abs(a.y - b.y) < 30) b.y = a.y + 30;
+      }
+    }
+    spots.innerHTML = boxes.map(({ p, x, y }) => `<div class="map-spot ${block ? "off" : ""}" data-go="${p.key}" style="left:${(x / 560) * 100}%;top:${(Math.min(y, 545) / 560) * 100}%;background:${p.color}" title="${block || "Go there"}">${p.label}</div>`).join("");
   }
-  bigMapR() { return 58; }
+  // v7: once the beach is open, the big map shows campus and beach together
+  bigMapR() { return this.world.zoneVisible("beach") ? 72 : 58; }
+  bigMapCenter() { return this.world.zoneVisible("beach") ? { x: 0, z: 34 } : { x: 0, z: 0 }; }
   closeBigMap() { this.root.querySelector("#bigmap").classList.add("hidden"); }
   teleportBlock() {
     if (this.ui.dialogOpen) return "Close the pop-up first";
@@ -594,17 +607,21 @@ class Game {
   }
 
   // ------------------------------------------------------------------ minimap
-  drawMinimap() { this.drawMap(this.minimap, 200, 62, true); }
+  drawMinimap() { this.drawMap(this.minimap, 200, 62, true, this.player.pos.z > 72 ? { x: 0, z: 96 } : { x: 0, z: 0 }); }
 
   // Shared by the minimap (small, centred on the campus) and the big map (clickable places).
-  drawMap(ctx, S, R, small) {
-    const mx = (x) => (x + R) / (2 * R) * S, my = (z) => (z + R) / (2 * R) * S;
+  drawMap(ctx, S, R, small, C = { x: 0, z: 0 }) {
+    const mx = (x) => (x - C.x + R) / (2 * R) * S, my = (z) => (z - C.z + R) / (2 * R) * S;
     const k = S / 200;
     ctx.clearRect(0, 0, S, S);
     ctx.fillStyle = "#79c25a"; ctx.fillRect(0, 0, S, S);
-    ctx.fillStyle = "#efe3c8";
     const path = (x0, x1, z0, z1) => ctx.fillRect(mx(x0), my(z0), mx(x1) - mx(x0), my(z1) - my(z0));
-    path(-80, 80, -2.2, 2.2); path(-2.2, 2.2, -16, 80);
+    // v7: beach and sea (greyed out while the beach is closed)
+    ctx.fillStyle = "#f2d9a0"; path(-75, 75, 76, 122);
+    ctx.fillStyle = "#2e86c1"; path(-200, 200, 122, 260);
+    ctx.fillStyle = "#8d6e63"; path(-66, 66, 73.8, 74.2);
+    ctx.fillStyle = "#efe3c8";
+    path(-80, 80, -2.2, 2.2); path(-2.2, 2.2, -16, 80); path(-60, 60, 79.8, 83.2);
     ctx.beginPath(); ctx.arc(mx(0), my(6), 8 / (2 * R) * S, 0, Math.PI * 2); ctx.fill();
     const v = this.view;
     for (const [key, b] of Object.entries(BUILDINGS)) {

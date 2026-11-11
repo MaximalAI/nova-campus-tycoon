@@ -5,6 +5,19 @@ are in game minutes; at 1x speed one game minute lasts one real second.
 The whole dict is JSON-compatible and is also sent to the browser.
 """
 
+# Lighting keyframes; values in between are interpolated smoothly.
+LIGHTING = [
+    {"t": 5.0, "name": "dawn", "sky": [0.05, 0.07, 0.18], "sun_color": [0.55, 0.6, 0.9], "sun": 0.08, "ambient": 0.28, "elevation": 4, "azimuth": 80, "lamps": 1.0},
+    {"t": 7.0, "name": "sunrise", "sky": [0.98, 0.62, 0.42], "sun_color": [1.0, 0.62, 0.38], "sun": 0.7, "ambient": 0.45, "elevation": 6, "azimuth": 90, "lamps": 0.5},
+    {"t": 8.5, "name": "daylight", "sky": [0.62, 0.8, 1.0], "sun_color": [1.0, 0.93, 0.8], "sun": 1.25, "ambient": 0.62, "elevation": 28, "azimuth": 115, "lamps": 0.0},
+    {"t": 13.0, "name": "daylight", "sky": [0.55, 0.78, 1.0], "sun_color": [1.0, 1.0, 0.96], "sun": 1.55, "ambient": 0.72, "elevation": 66, "azimuth": 185, "lamps": 0.0},
+    {"t": 17.5, "name": "sunset", "sky": [0.62, 0.78, 0.98], "sun_color": [1.0, 0.9, 0.75], "sun": 1.2, "ambient": 0.6, "elevation": 24, "azimuth": 250, "lamps": 0.0},
+    {"t": 19.5, "name": "dusk", "sky": [0.96, 0.5, 0.46], "sun_color": [1.0, 0.5, 0.42], "sun": 0.5, "ambient": 0.4, "elevation": 3, "azimuth": 275, "lamps": 0.8},
+    {"t": 21.0, "name": "dusk", "sky": [0.06, 0.08, 0.22], "sun_color": [0.55, 0.6, 0.9], "sun": 0.08, "ambient": 0.28, "elevation": 4, "azimuth": 285, "lamps": 1.0},
+]
+# v7: the Praia Bar opens when the sunset lighting phase starts
+SUNSET = next(k["t"] for k in LIGHTING if k["name"] == "sunset")
+
 CONFIG = {
     "time": {
         "day_start": 5.0,
@@ -47,6 +60,30 @@ CONFIG = {
             "Paul", "Francisca", "Henrique", "Sara", "Max", "Joana", "Vasco",
         ],
     },
+    # v7: visitors of the beach zone (only once it is unlocked). They have more money and
+    # their own day: a quiet morning, a busy afternoon and a crowd at sunset.
+    "beach_visitors": {
+        "pool_size": 20,
+        "budget": 6_000,
+        "phases": [
+            {"name": "Night", "from": 5.0, "to": 8.0, "target": 0, "cafe_probability": 0.0},
+            {"name": "Morning surf", "from": 8.0, "to": 11.0, "target": 8, "cafe_probability": 0.7},
+            {"name": "Midday", "from": 11.0, "to": 15.0, "target": 20, "cafe_probability": 0.75},
+            {"name": "Afternoon", "from": 15.0, "to": 17.5, "target": 14, "cafe_probability": 0.7},
+            {"name": "Sunset", "from": 17.5, "to": 19.5, "target": 20, "cafe_probability": 0.95},
+            {"name": "Evening", "from": 19.5, "to": 20.0, "target": 6, "cafe_probability": 0.5},
+            {"name": "Closed", "from": 20.0, "to": 21.0, "target": 0, "cafe_probability": 0.0},
+        ],
+        "names": ["Kai", "Nina", "Bruno", "Alice", "Rafa", "Zoe", "Hugo", "Iris", "Theo", "Lina",
+                  "Marco", "Eva", "Simão", "Julia", "Nuno", "Ola", "Rúben", "Ines", "Lars", "Mila"],
+    },
+    # v7: the beach weather, new every day (seeded). It changes the demand of some shops.
+    "weather": {
+        "waves": [1, 5],  # stars
+        "wave_factor": {"1": 0.4, "2": 0.7, "3": 1.0, "4": 1.3, "5": 1.6},
+        "temperature": [16, 34],  # °C
+        "temperature_factor": [0.5, 1.6],  # demand factor at the lowest and highest temperature
+    },
     "max_queue": 4,  # default; every shop has its own "max_queue"
     "reputation": {
         "start": 50,
@@ -80,15 +117,7 @@ CONFIG = {
         {"name": "Closed", "from": 20.0, "to": 21.0, "target": 0, "cafe_probability": 0.0},
     ],
     # Lighting keyframes; values in between are interpolated smoothly.
-    "lighting": [
-        {"t": 5.0, "name": "dawn", "sky": [0.05, 0.07, 0.18], "sun_color": [0.55, 0.6, 0.9], "sun": 0.08, "ambient": 0.28, "elevation": 4, "azimuth": 80, "lamps": 1.0},
-        {"t": 7.0, "name": "sunrise", "sky": [0.98, 0.62, 0.42], "sun_color": [1.0, 0.62, 0.38], "sun": 0.7, "ambient": 0.45, "elevation": 6, "azimuth": 90, "lamps": 0.5},
-        {"t": 8.5, "name": "daylight", "sky": [0.62, 0.8, 1.0], "sun_color": [1.0, 0.93, 0.8], "sun": 1.25, "ambient": 0.62, "elevation": 28, "azimuth": 115, "lamps": 0.0},
-        {"t": 13.0, "name": "daylight", "sky": [0.55, 0.78, 1.0], "sun_color": [1.0, 1.0, 0.96], "sun": 1.55, "ambient": 0.72, "elevation": 66, "azimuth": 185, "lamps": 0.0},
-        {"t": 17.5, "name": "sunset", "sky": [0.62, 0.78, 0.98], "sun_color": [1.0, 0.9, 0.75], "sun": 1.2, "ambient": 0.6, "elevation": 24, "azimuth": 250, "lamps": 0.0},
-        {"t": 19.5, "name": "dusk", "sky": [0.96, 0.5, 0.46], "sun_color": [1.0, 0.5, 0.42], "sun": 0.5, "ambient": 0.4, "elevation": 3, "azimuth": 275, "lamps": 0.8},
-        {"t": 21.0, "name": "dusk", "sky": [0.06, 0.08, 0.22], "sun_color": [0.55, 0.6, 0.9], "sun": 0.08, "ambient": 0.28, "elevation": 4, "azimuth": 285, "lamps": 1.0},
-    ],
+    "lighting": LIGHTING,
     "wholesale_items": {
         "coffee_beans": {
             "name": "Coffee beans", "icon": "🫘", "unit": "250 g pack", "price": 400,
@@ -190,6 +219,49 @@ CONFIG = {
             "base_units": 8, "base_name": "slices", "shelf_days": None,
             "description": "Two pizzas, four slices each.",
         },
+        # Surf Shack: boards and wetsuits are bought once and come back after each rental
+        "surfboard": {
+            "name": "Surfboard", "icon": "🏄", "unit": "board", "price": 6_000,
+            "base_units": 1, "base_name": "boards", "shelf_days": None, "reusable": True,
+            "description": "A soft-top board for beginners. You keep it: it comes back after every rental.",
+        },
+        "wetsuit": {
+            "name": "Wetsuit", "icon": "🤿", "unit": "suit", "price": 3_500,
+            "base_units": 1, "base_name": "suits", "shelf_days": None, "reusable": True,
+            "description": "4/3 mm wetsuit. After a rental it has to dry for a while.",
+        },
+        "surf_instructor": {
+            "name": "Surf instructor", "icon": "🧑‍🏫", "unit": "day booking", "price": 4_000,
+            "base_units": 4, "base_name": "classes", "shelf_days": 1,
+            "description": "An instructor for one day: up to four classes.",
+        },
+        # Praia Bar
+        "draught_beer": {
+            "name": "Draught beer", "icon": "🍺", "unit": "keg", "price": 4_000,
+            "base_units": 50, "base_name": "glasses", "shelf_days": 7,
+            "description": "A keg of Portuguese lager, 50 glasses.",
+        },
+        "red_wine": {
+            "name": "Red wine", "icon": "🍷", "unit": "bottle", "price": 400,
+            "base_units": 5, "base_name": "glasses", "shelf_days": None,
+            "description": "Alentejo red for sangria. Five glasses per bottle.",
+        },
+        "burger_patties": {
+            "name": "Burger patties", "icon": "🍔", "unit": "box of 10", "price": 800,
+            "base_units": 10, "base_name": "patties", "shelf_days": 2,
+            "description": "Beef patties with buns.",
+        },
+        # Gelado Kiosk
+        "ice_cream": {
+            "name": "Ice cream", "icon": "🍨", "unit": "5 l tub", "price": 1_000,
+            "base_units": 20, "base_name": "scoops", "shelf_days": None,
+            "description": "Vanilla and chocolate. Keeps in the freezer - melts in the display.",
+        },
+        "ice_lollies": {
+            "name": "Ice lollies", "icon": "🍭", "unit": "box of 10", "price": 400,
+            "base_units": 10, "base_name": "lollies", "shelf_days": None,
+            "description": "Fruit lollies. Keep them frozen.",
+        },
         "pudding_cups": {
             "name": "Pudding cups", "icon": "🍮", "unit": "pack of 12", "price": 480,
             "base_units": 12, "base_name": "cups", "shelf_days": 4,
@@ -283,12 +355,59 @@ CONFIG = {
             "name": "Pudding", "icon": "🍮", "uses": {"pudding_cups": 1},
             "station": "fridge", "prep_minutes": 1, "description": "Pudim flan.",
         },
+        # Beach. "max_price" overrides the price limit for expensive products.
+        "surf_rental": {
+            "name": "Surfboard rental", "icon": "🏄", "uses": {"surfboard": 1},
+            "station": "board_rack", "prep_minutes": 1, "description": "A board for two hours.",
+            "utility": [600, 2_400], "max_price": 3_000,
+        },
+        "wetsuit_rental": {
+            "name": "Wetsuit rental", "icon": "🤿", "uses": {"wetsuit": 1},
+            "station": "suit_rack", "prep_minutes": 1, "description": "A wetsuit for two hours.",
+            "utility": [300, 1_200], "max_price": 3_000,
+        },
+        "surf_class": {
+            "name": "Surf class", "icon": "🧑‍🏫", "uses": {"surf_instructor": 1},
+            "station": "desk", "prep_minutes": 1, "description": "One hour with an instructor.",
+            "utility": [1_200, 4_500], "max_price": 6_000,
+        },
+        "beer": {
+            "name": "Beer", "icon": "🍺", "uses": {"draught_beer": 1},
+            "station": "tap", "prep_minutes": 1, "description": "A cold imperial.",
+            "utility": [150, 600],
+        },
+        "sangria": {
+            "name": "Sangria", "icon": "🍷", "uses": {"red_wine": 1, "fruit_mix": 1},
+            "station": "bar", "prep_minutes": 2, "description": "Red wine with fresh fruit.",
+            "utility": [250, 900],
+        },
+        "burger": {
+            "name": "Burger", "icon": "🍔", "uses": {"burger_patties": 1},
+            "station": "grill", "prep_minutes": 3, "description": "Beef burger at sunset.",
+            "utility": [400, 1_400],
+        },
+        "ice_scoop": {
+            "name": "Ice cream scoop", "icon": "🍨", "uses": {"ice_cream": 1},
+            "station": "freezer", "prep_minutes": 1, "description": "One scoop, your flavour.",
+            "utility": [100, 500],
+        },
+        "ice_lolly": {
+            "name": "Ice lolly", "icon": "🍭", "uses": {"ice_lollies": 1},
+            "station": "freezer", "prep_minutes": 1, "description": "Strawberry or lemon.",
+            "utility": [80, 350],
+        },
+        "iced_coffee": {
+            "name": "Iced coffee", "icon": "🧋", "uses": {"coffee_beans": 1, "ice_cream": 1},
+            "station": "coffee_machine", "prep_minutes": 2, "description": "Espresso over vanilla ice cream.",
+            "utility": [150, 600],
+        },
     },
     # v7: the monopoly race. Shops are bought in "order"; a zone opens when every shop of the
     # zone named in "unlock_after" is yours. Money in cents. "building" is the layout the
     # browser draws for the new shops (the first two cafés have hand-built interiors).
     "zones": {
         "campus": {"name": "Campus", "unlock_after": None},
+        "beach": {"name": "Carcavelos beach", "unlock_after": "campus"},
     },
     "shops": {
         "cafe": {
@@ -349,6 +468,40 @@ CONFIG = {
             "icon": "🍽️",
             "building": {"x0": -26, "x1": -10, "z0": -34, "z1": -20, "door": "south", "wall": 0xeceff1,
                          "trim": 0x37474f, "roof": 0x455a64, "sign": "NOVA MENSA", "interior": "counter"},
+        },
+        "surf_shack": {
+            "name": "Surf Shack", "products": ["surf_rental", "wetsuit_rental", "surf_class"],
+            "base_factor": 1.0, "start_owner": "bot", "order": 7, "zone": "beach",
+            "start_prices": {"surf_rental": 1_200, "wetsuit_rental": 600, "surf_class": 2_500},
+            "acquisition_cost": 340_000, "manager_cost": 35_000, "max_queue": 4, "open_hours": None,
+            "mechanic": {"type": "rental", "rentals": {"surf_rental": {"hours": 2.0},
+                                                       "wetsuit_rental": {"hours": 2.0, "dry_hours": 1.0}},
+                         "turns_per_day": 4, "weather": "waves"},
+            "icon": "🏄",
+            "building": {"x0": -38, "x1": -26, "z0": 86, "z1": 96, "door": "north", "wall": 0xfffde7,
+                         "trim": 0x00838f, "roof": 0x0097a7, "sign": "SURF SHACK", "interior": "counter"},
+        },
+        "praia_bar": {
+            "name": "Praia Bar", "products": ["beer", "sangria", "burger"],
+            "base_factor": 1.1, "start_owner": "bot", "order": 8, "zone": "beach",
+            "start_prices": {"beer": 250, "sangria": 400, "burger": 700},
+            "acquisition_cost": 420_000, "manager_cost": 40_000, "max_queue": 6, "open_hours": [SUNSET, 20.0],
+            "mechanic": {"type": "sunset_bar", "happy_hours": 1.0, "discount": 0.3, "max_discount": 0.5,
+                         "happy_factor": 1.4, "toast": "Happy hour at Praia Bar!"},
+            "icon": "🍹",
+            "building": {"x0": -8, "x1": 8, "z0": 86, "z1": 98, "door": "north", "wall": 0xffe0b2,
+                         "trim": 0xd84315, "roof": 0x8d6e63, "sign": "PRAIA BAR", "interior": "counter"},
+        },
+        "gelado": {
+            "name": "Gelado Kiosk", "products": ["ice_scoop", "ice_lolly", "iced_coffee"],
+            "base_factor": 1.0, "start_owner": "bot", "order": 9, "zone": "beach",
+            "start_prices": {"ice_scoop": 200, "ice_lolly": 150, "iced_coffee": 300},
+            "acquisition_cost": 500_000, "manager_cost": 40_000, "max_queue": 5, "open_hours": None,
+            "mechanic": {"type": "melting", "front": ["ice_scoop", "ice_lolly"], "capacity": 30, "melt_hours": 3.0,
+                         "weather": "temperature"},
+            "icon": "🍦",
+            "building": {"x0": 22, "x1": 32, "z0": 86, "z1": 96, "door": "north", "wall": 0xfce4ec,
+                         "trim": 0xad1457, "roof": 0xf48fb1, "sign": "GELADO", "interior": "counter"},
         },
     },
     # Headless balance run (simulation.py --campaign): the target days for each purchase.

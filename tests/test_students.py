@@ -16,8 +16,10 @@ def schedule():
 
 def test_pool_has_40_students_with_budget_utilities_and_traits():
     pool = st.make_pool(seed=1, day=1)
-    assert len(pool) == CONFIG["students"]["pool_size"] == 40  # v7: 25 -> 40
-    for s in pool.values():
+    campus = {sid: s for sid, s in pool.items() if s["zone"] == "campus"}
+    assert len(campus) == CONFIG["students"]["pool_size"] == 40  # v7: 25 -> 40
+    assert len(pool) - len(campus) == CONFIG["beach_visitors"]["pool_size"]  # v7: beach visitors
+    for s in campus.values():
         assert s["budget"] == CONFIG["students"]["budget"]
         assert len(s["utilities"]) == len(st.all_offerings())
         for key, u in s["utilities"].items():
@@ -123,7 +125,8 @@ def test_same_purchases_at_1x_and_8x():
 def test_students_never_overspend_and_keep_budget_between_visits():
     state = sim.simulate_day(sim.morning_setup(logic.new_game(seed=5)), speed=8)
     for s in state["students"].values():
-        spent = CONFIG["students"]["budget"] - s["budget"]
+        start = CONFIG["beach_visitors"]["budget"] if s["zone"] == "beach" else CONFIG["students"]["budget"]
+        spent = start - s["budget"]
         assert s["budget"] >= 0
         paid = sum(state["shops"][p["shop"]]["prices"][i] for p in s["purchases"] for i in p["items"])
         assert paid == spent

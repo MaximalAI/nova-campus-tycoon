@@ -154,13 +154,16 @@ def _start_day(state: dict, day: int) -> dict:
         "stats": _empty_stats(),
         "summary": None,
         "students": st.make_pool(state["seed"], day),
-        "schedule": st.make_schedule(state["seed"], day),
         "restock": None,
         "manager_proposals": {},
+        "weather": weather_for(state["seed"], day),
+        "zone_news": [],
     })
     for shop in SHOP_ORDER:
         if state["shops"][shop].get("sold") and state["shops"][shop]["owner"] == "bot":
-            _take_over(state, shop)
+            state["zone_news"] += _take_over(state, shop)
+    # v7: the visitors of a zone only come once the zone is open
+    state["schedule"] = st.make_schedule(state["seed"], day, zones=tuple(z for z in CONFIG["zones"] if zone_open(state, z)))
     for shop in SHOP_ORDER:
         mechanics.of(shop).start_day(state)
     for shop in owned_shops(state):
@@ -180,6 +183,13 @@ def _start_day(state: dict, day: int) -> dict:
         state["plan"] = {p: state["plan"].get(p, defaults.get(p, CONFIG["manager"]["min_portions"]))
                          for p in SHOPS[ws]["products"]}
     return state
+
+
+def weather_for(seed: int, day: int) -> dict:
+    """v7: the beach weather of a day (seeded): wave rating and temperature."""
+    w = CONFIG["weather"]
+    rng = random.Random(f"{seed}-{day}-weather")
+    return {"waves": rng.randint(*w["waves"]), "temperature": rng.randint(*w["temperature"])}
 
 
 def migrate(state: dict) -> dict:
@@ -216,6 +226,13 @@ def migrate(state: dict) -> dict:
         state.pop("open_mode", None)
     for student in state.get("students", {}).values():
         st.complete_student(state["seed"], state["day"], student)
+    state.setdefault("weather", weather_for(state["seed"], state["day"]))
+    state.setdefault("zone_news", [])
+    if "students" in state:  # v7: the beach visitors exist (but do not come before the beach opens)
+        for sid, student in st.make_pool(state["seed"], state["day"]).items():
+            if sid not in state["students"]:
+                state["students"][sid] = student
+                state.setdefault("schedule", {})[sid] = {"presence": [], "decisions": []}
     stats = state.get("stats")
     if stats is not None:  # v3 and older: new statistics fields
         stats.setdefault("wasted", 0)
@@ -256,7 +273,7 @@ def manager_proposal(state: dict, shop: str) -> dict:
         buffer = m["sold_out_buffer"] if sold_out else m["buffer"]
         plan[p] = max(m["min_portions"], math.ceil(sold * buffer))
         if y and sold_out:
-            prices[p] = min(CONFIG["max_price"], prices[p] + CONFIG["price_step"])
+            prices[p] = min(PRODUCTS[p].get("max_price", CONFIG["max_price"]), prices[p] + CONFIG["price_step"])
         elif y and sold == 0:
             floor = math.ceil((unit_cost(p) + CONFIG["price_step"]) / CONFIG["price_step"]) * CONFIG["price_step"]
             prices[p] = max(floor, prices[p] - CONFIG["price_step"])
@@ -542,11 +559,13 @@ def shopping_list(state: dict, plan: dict[str, int], shop: str | None = None) ->
     for product, portions in plan.items():
         if product in front and state["shops"][shop]["owner"] == "player":
             portions = max(0, portions - front_units(state, shop, product))  # already in the machine / on the shelf
+        portions = mechanics.of(shop).units_for(product, portions)  # rentals: one board serves several customers
         for item, qty in PRODUCTS[product]["uses"].items():
             need[item] = need.get(item, 0) + portions * qty
     result = {}
     for item, units in need.items():
-        have = stock_units(state, shop, item) if state["shops"][shop]["owner"] == "player" else 0
+        have = (stock_units(state, shop, item) + mechanics.of(shop).away_units(state, item)
+                if state["shops"][shop]["owner"] == "player" else 0)
         missing = max(0, units - have)
         packs = math.ceil(missing / ITEMS[item]["base_units"])
         if packs:
@@ -663,8 +682,9 @@ def _check_prices(shop: str, prices: dict) -> None:
             raise GameError(f"{product} is not sold in this shop.")
         if isinstance(price, bool) or not isinstance(price, int):
             raise GameError("Prices must be whole cents.")
-        if price <= 0 or price > CONFIG["max_price"] or price % CONFIG["price_step"]:
-            raise GameError(f"Prices must be between €0.10 and {euro(CONFIG['max_price'])} in steps of €0.10.")
+        top = PRODUCTS[product].get("max_price", CONFIG["max_price"])  # v7: expensive beach products
+        if price <= 0 or price > top or price % CONFIG["price_step"]:
+            raise GameError(f"Prices must be between €0.10 and {euro(top)} in steps of €0.10.")
 
 
 def _ev_confirm_manager_plan(state, ev):
@@ -1426,6 +1446,17 @@ def _ev_assemble(state, ev):
             "product": product, "tray": list(state["tray"])}
 
 
+def _ev_set_happy_hour(state, ev):
+    """Praia Bar: choose the happy hour discount (P32)."""
+    shop = ev.get("shop")
+    _require_owned(state, shop)
+    mech = mechanics.of(shop)
+    if not hasattr(mech, "set_discount"):
+        raise GameError("This shop has no happy hour.")
+    mech.set_discount(state, ev.get("discount"))
+    return {"toast": f"Happy hour: {round(mech.discount(state) * 100)} % off"}
+
+
 def _ev_checkout(state, ev):
     """Scan the shopping of the customer at the register (P09 in a self-service shop)."""
     shop = ev.get("shop")
@@ -1475,6 +1506,7 @@ HANDLERS = {
     "repair": _ev_repair,
     "checkout": _ev_checkout,
     "assemble": _ev_assemble,
+    "set_happy_hour": _ev_set_happy_hour,
 }
 
 
@@ -1625,6 +1657,8 @@ def view(state: dict) -> dict:
         "buy_blocker": buy_blocker(state),
         "for_sale": next_target(state) if buy_blocker(state) is None else None,
         "zones_open": [z for z in CONFIG["zones"] if zone_open(state, z)],
+        "zone_news": state.get("zone_news", []),
+        "weather": state.get("weather"),
         "items_available": [i for i in ITEMS if item_available(state, i)],
         "monopoly": monopoly_progress(state),
         # v5/v6 names, kept for the first acquisition

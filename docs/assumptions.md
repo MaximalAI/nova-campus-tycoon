@@ -94,3 +94,20 @@ Decisions that the brief left open or that came up during implementation. Change
 - After the victory: "Keep playing (open mode)" continues the game without a goal (no second victory screen).
 - The competitor's display shows croissants.
 - M opens and closes the big map.
+
+## v7 changes (campus expansion)
+- Nine shops in two zones, bought in a fixed order (config "order"). Buying rule: only the next shop, and only when every shop you own has a hired manager (hired counts, he may start tomorrow).
+- Everything new is data in `config.py`; the rules of each mechanic are a small class in `mechanics.py`, found by the mechanic type. `logic.py` never asks for a shop name.
+- The two classic cafés keep their ids ("cafe", "rival") and their random utilities, so v4 to v6 saves load (`logic.migrate`). A v6 game that had already won continues with the new goal.
+- Decisions: a visit goes to one shop. The best bundle is computed per shop (at most three products) instead of over all 27 offerings.
+- Student economy: 40 campus students with €28 each (v6: 25 with €16), so nine shops find customers. Beach visitors (20, €60 each) only exist once the beach is open and stay at the beach.
+- Prices of the shops and managers were tuned with the headless campaign simulation (a perfect player who buys and hires as soon as allowed): first shop around day 10, then about 5 days per shop.
+- SnackBots: breakdown chance 4 % per machine and opening hour (seeded). A broken machine stays broken overnight until repaired.
+- Mercado & Go: 60 shelf places, filling allowed until 10:00. Shelf goods spoil with their shortest-lived ingredient (sandwiches overnight).
+- Bowl Bar: one assembly station; the set of ingredients decides the product (exact match), anything else is a "wrong bowl".
+- Nova Mensa: open 11:30 to 14:30, demand factor x1.4 during the rush; customers already in the queue at 14:30 are still served.
+- Surf Shack: a rental takes 2 game hours, a wetsuit then dries 1 hour; everything is back overnight. A manager plans one board per 4 rentals.
+- Praia Bar: opens at the start of the "sunset" lighting phase, happy hour for the first hour (discount 0 to 50 % in steps of 5 %, demand x1.4).
+- Gelado Kiosk: display portions melt 3 game hours after filling and overnight; the freezer keeps. A manager keeps the display half full.
+- The beach weather (waves 1 to 5, temperature 16 to 34 °C) is seeded per day and shown in the morning (P30).
+- The mechanics run on ticks every full hour (plus 11:30, 14:30, 17:30, 18:30), sent by the browser and by the simulation.

@@ -188,12 +188,13 @@ class World {
       m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, 0.02, (z0 + z1) / 2); m.receiveShadow = true; s.add(m);
     };
     path(-70, 70, -2.2, 2.2);
-    path(-2.2, 2.2, -16, 70);
+    path(-2.2, 2.2, -16, 80);  // v7: down to the beach promenade
     path(-70, -40, -8, -6.5);
     // v7: a path from the main paths to every new shop's door
     for (const key of this.newShops) {
       const pt = P[key], d = pt.frame;
       const a = pt.doorOut;
+      if (BUILDINGS[key].zone === "beach") { path(a.x - 1.2, a.x + 1.2, Math.min(a.z, 81.5), Math.max(a.z, 81.5)); continue; }
       if (d.inn.x !== 0) { // door in an east/west wall: walk sideways to the north-south path
         path(Math.min(a.x, 0), Math.max(a.x, 0), a.z - 1.2, a.z + 1.2);
       } else { // door in a north/south wall: walk to the east-west path
@@ -206,6 +207,7 @@ class World {
     this.box(2.4, 0.1, 2.4, 0x4ea8de, 0, 0.62, 6, { cast: false });
     this.collide(-1.7, 1.7, 4.3, 7.7);
 
+    this.buildBeach();
     for (const [key, b] of Object.entries(BUILDINGS)) this.buildBuilding(key, b);
     this.buildCafeInterior();
     this.buildRivalInterior();
@@ -233,6 +235,43 @@ class World {
       new THREE.MeshBasicMaterial({ color: 0xffd166, side: THREE.DoubleSide, transparent: true, opacity: 0.95 }));
     s.add(arrow);
     this.markers.arrow = arrow;
+    this.mergeStatic();
+  }
+
+  // v7: nine shops and a beach mean many small meshes. Everything that never changes
+  // (no interaction, no highlight, no visibility switch) is merged into a few big meshes
+  // by colour, so the browser draws far fewer objects per frame.
+  mergeStatic() {
+    const skip = new Set([this.floorSpot, this.gates.beach && this.gates.beach.mesh]);
+    for (const parts of Object.values(this.buildingParts)) { for (const m of parts.walls) skip.add(m); skip.add(parts.roof); skip.add(parts.sign); }
+    const groups = new Map();
+    for (const m of [...this.scene.children]) {
+      if (!m.isMesh || skip.has(m) || m.userData.interactable || m.userData.dynamic) continue;
+      const mat = m.material;
+      if (Array.isArray(mat) || !mat.isMeshLambertMaterial || mat.map || mat.transparent || this.windowMats.includes(mat)) continue;
+      const key = [mat.color.getHex(), mat.emissive.getHex(), mat.flatShading, m.castShadow, m.receiveShadow].join(":");
+      if (!groups.has(key)) groups.set(key, { mat, cast: m.castShadow, receive: m.receiveShadow, meshes: [] });
+      groups.get(key).meshes.push(m);
+    }
+    for (const g of groups.values()) {
+      if (g.meshes.length < 2) continue;
+      const pos = [], nor = [];
+      for (const m of g.meshes) {
+        m.updateMatrixWorld(true);
+        const geo = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+        geo.applyMatrix4(m.matrixWorld);
+        pos.push(geo.attributes.position.array); nor.push(geo.attributes.normal.array);
+        geo.dispose(); m.geometry.dispose();
+        this.scene.remove(m);
+      }
+      const cat = (arrs) => { const out = new Float32Array(arrs.reduce((a, x) => a + x.length, 0)); let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; } return out; };
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(cat(pos), 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(cat(nor), 3));
+      const merged = new THREE.Mesh(geo, g.mat);
+      merged.castShadow = g.cast; merged.receiveShadow = g.receive;
+      this.scene.add(merged);
+    }
   }
 
   buildBuilding(key, b) {
@@ -350,6 +389,25 @@ class World {
     } else if (kind === "fridge") {
       add(new THREE.BoxGeometry(1.2, 1.1, 0.7), 0xeceff1, 0, 1.55, 0);
       for (let i = 0; i < 3; i++) add(new THREE.CylinderGeometry(0.09, 0.08, 0.12, 10), 0xf6bd60, -0.3 + i * 0.3, 1.12, 0.3);
+    } else if (kind === "board_rack") {
+      for (let i = 0; i < 3; i++) { const b = add(new THREE.BoxGeometry(0.5, 1.9, 0.08), [0xffbe0b, 0x3a86ff, 0xe63946][i], -0.45 + i * 0.45, 1.5, -0.1); b.rotation.z = 0.08; }
+    } else if (kind === "suit_rack") {
+      add(new THREE.BoxGeometry(1.3, 0.05, 0.05), 0x555555, 0, 2.0, 0);
+      for (let i = 0; i < 3; i++) add(new THREE.BoxGeometry(0.34, 0.9, 0.08), 0x212121, -0.4 + i * 0.4, 1.5, 0);
+    } else if (kind === "desk") {
+      add(new THREE.BoxGeometry(0.9, 0.5, 0.05), 0x00838f, 0, 1.35, -0.2);
+      add(new THREE.CylinderGeometry(0.05, 0.05, 0.4, 8), 0xffffff, 0.45, 1.2, 0.1);
+    } else if (kind === "tap") {
+      add(new THREE.BoxGeometry(0.3, 0.5, 0.25), 0xb0bec5, 0, 1.25, 0);
+      add(new THREE.CylinderGeometry(0.04, 0.04, 0.3, 8), 0xffd54f, 0, 1.55, 0.15);
+      for (const bx of [-0.45, 0.45]) add(new THREE.CylinderGeometry(0.08, 0.07, 0.2, 10), 0xffe082, bx, 1.1, 0.2);
+    } else if (kind === "bar") {
+      add(new THREE.CylinderGeometry(0.22, 0.2, 0.32, 14), 0xad1457, -0.3, 1.16, 0);
+      for (let i = 0; i < 3; i++) add(new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8), 0x4a148c, 0.15 + i * 0.16, 1.15, 0);
+    } else if (kind === "freezer") {
+      const glass = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.35, 0.7), new THREE.MeshLambertMaterial({ color: 0xe1f5fe, transparent: true, opacity: 0.6 }));
+      glass.position.set(0, 1.18, 0); g.add(glass); meshes.push(glass);
+      for (let i = 0; i < 4; i++) add(new THREE.CylinderGeometry(0.13, 0.13, 0.12, 12), [0xfff3e0, 0x6d4c41, 0xf48fb1, 0xc5e1a5][i], -0.45 + i * 0.3, 1.08, 0);
     } else if (kind === "coffee_machine") {
       add(new THREE.BoxGeometry(0.8, 0.7, 0.55), 0x37474f, 0, 1.35, 0);
       add(new THREE.CylinderGeometry(0.12, 0.12, 0.25, 12), 0xb0bec5, 0.2, 1.85, 0);
@@ -544,6 +602,66 @@ class World {
       action: () => g.flow.useCounterFront("rival") });
   }
 
+  // v7: Carcavelos beach south of the campus: sand, sea, a promenade, and a fence with a
+  // gate that stays closed until every campus shop is yours.
+  buildBeach() {
+    const s = this.scene, g = this.game;
+    const sand = new THREE.Mesh(new THREE.PlaneGeometry(150, 50), this.mat(0xf2d9a0));
+    sand.rotation.x = -Math.PI / 2; sand.position.set(0, 0.015, 101); sand.receiveShadow = true; s.add(sand);
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(400, 120), new THREE.MeshLambertMaterial({ color: 0x2e86c1, emissive: 0x0b3d5c }));
+    sea.rotation.x = -Math.PI / 2; sea.position.set(0, 0.03, 186); s.add(sea);
+    for (let i = 0; i < 6; i++) { // a few lines of surf
+      const foam = new THREE.Mesh(new THREE.PlaneGeometry(150, 0.6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 }));
+      foam.rotation.x = -Math.PI / 2; foam.position.set(0, 0.04, 127 + i * 3.5); s.add(foam);
+    }
+    this.collide(-200, 200, 121.5, 123); // nobody walks into the sea
+    const promenade = new THREE.Mesh(new THREE.PlaneGeometry(120, 3.4), this.mat(0xd7ccc8));
+    promenade.rotation.x = -Math.PI / 2; promenade.position.set(0, 0.025, 81.5); promenade.receiveShadow = true; s.add(promenade);
+    // umbrellas and towels on the sand
+    const colors = [0xe63946, 0xffbe0b, 0x3a86ff, 0x2a9d8f, 0xff006e];
+    [[-48, 108], [-20, 112], [-6, 110], [12, 114], [40, 108], [52, 113], [-40, 116], [30, 117]].forEach(([x, z], i) => {
+      this.box(0.08, 2.2, 0.08, 0xeeeeee, x, 1.1, z);
+      const top = new THREE.Mesh(new THREE.ConeGeometry(1.4, 0.6, 10), this.mat(colors[i % colors.length], { flatShading: true }));
+      top.position.set(x, 2.3, z); top.castShadow = true; s.add(top);
+      this.box(1.0, 0.03, 1.8, colors[(i + 2) % colors.length], x + 1.3, 0.03, z + 0.4, { cast: false });
+      this.collide(x - 0.2, x + 0.2, z - 0.2, z + 0.2);
+    });
+    for (const [x, z] of [[-50, 88], [-14, 89], [14, 89], [44, 89], [-56, 100], [58, 99]]) this.palm(x, z);
+    // the fence between campus and beach, with a gate on the path
+    const fenceZ = 74;
+    for (let x = -66; x <= 66; x += 3) {
+      if (Math.abs(x) < 3) continue;
+      this.box(0.15, 1.1, 0.15, 0x8d6e63, x, 0.55, fenceZ, { cast: false });
+    }
+    this.box(63.5, 0.1, 0.08, 0x8d6e63, -34.25, 0.95, fenceZ, { cast: false });
+    this.box(63.5, 0.1, 0.08, 0x8d6e63, 34.25, 0.95, fenceZ, { cast: false });
+    this.collide(-66, -2.6, fenceZ - 0.2, fenceZ + 0.2);
+    this.collide(2.6, 66, fenceZ - 0.2, fenceZ + 0.2);
+    const gate = this.box(5.0, 1.2, 0.12, 0xc0392b, 0, 0.6, fenceZ);
+    this.gates.beach = { x0: -2.6, x1: 2.6, z0: fenceZ - 0.2, z1: fenceZ + 0.2, active: true, mesh: gate };
+    this.colliders.push(this.gates.beach);
+    const signTex = this.textTexture("BEACH: OPENS WHEN THE CAMPUS IS YOURS", "#c0392b", "#ffffff", 1024, 128, 46);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 0.65), new THREE.MeshBasicMaterial({ map: signTex, side: THREE.DoubleSide }));
+    sign.position.set(0, 1.75, fenceZ - 0.1); s.add(sign);
+    this.gates.beach.sign = sign;
+    // forecast board on the promenade (P30)
+    const board = this.board("SURF & SUN", 4.5, 79.6, Math.PI, "#00838f");
+    this.addInteractable({ id: "forecast_board", pos: { x: 4.5, z: 81.0 }, radius: 2.2, meshes: [board], label: () => "Beach forecast",
+      enabled: () => this.zoneVisible("beach"), action: () => g.flow.openForecast() });
+    for (const [x, z] of [[-30, 83.6], [-10, 83.6], [10, 83.6], [30, 83.6]]) this.lamp(x, z);
+  }
+
+  palm(x, z) {
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 4.2, 8), this.mat(0x8d6e63));
+    trunk.position.set(x, 2.1, z); trunk.rotation.z = 0.12; trunk.castShadow = true; this.scene.add(trunk);
+    for (let i = 0; i < 6; i++) {
+      const leaf = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.06, 0.5), this.mat(0x2e7d32));
+      leaf.position.set(x + 0.4 + Math.cos(i) * 0.9, 4.1, z + Math.sin(i) * 0.9); leaf.rotation.y = i; leaf.rotation.z = -0.35;
+      leaf.castShadow = true; this.scene.add(leaf);
+    }
+    this.collide(x - 0.3, x + 0.3, z - 0.3, z + 0.3);
+  }
+
   // v7: interiors of the new shops, built from the frame of the building.
   //   counter: counter with a gap, stations along the back wall (one per station kind)
   //   market:  checkout counter near the back, product shelves along the side walls
@@ -603,7 +721,8 @@ class World {
         const front = at(D - 1.9, lat);
         stationAt[kind] = front;
         this.addInteractable({ id: `station_${key}_${kind}`, pos: front, meshes,
-          label: () => g.flow.stationLabel(key, kind), enabled: manual, action: () => g.flow.useStation(key, kind) });
+          label: () => g.flow.stationLabel(key, kind), enabled: () => manual() || g.flow.stationExtra(key, kind) !== null,
+          action: () => g.flow.useStation(key, kind) });
       });
       if (b.interior === "market") {
         // product shelves along the side walls (customer side), filled from the storage
@@ -617,6 +736,7 @@ class World {
           for (let k = 0; k < 4; k++) {
             const m = boxAt(0.36, 0.26, 0.36, 0xffffff, d - 0.4 + (k % 2) * 0.8, side * (W / 2 - 0.85), 0.55 + Math.floor(k / 2) * 0.5);
             m.material = this.mat([0xffd166, 0x4ea8de, 0xe63946][i % 3]);
+            m.userData.dynamic = true; // shown by the stock on the shelf
             goods.push(m);
           }
           this.marketShelves[key].push({ product: p, goods });
@@ -856,17 +976,23 @@ class World {
   buildNav() {
     this.navStep = 3;
     this.navMin = -66;
-    this.navN = 45;
-    this.navFree = new Uint8Array(this.navN * this.navN);
-    for (let i = 0; i < this.navN; i++) for (let j = 0; j < this.navN; j++) {
+    this.navN = 45; // cells along x
+    this.navNZ = 61; // v7: along z down to the beach (z up to 114)
+    this.navFree = new Uint8Array(this.navN * this.navNZ);
+    for (let i = 0; i < this.navN; i++) for (let j = 0; j < this.navNZ; j++) {
       const x = this.navMin + i * this.navStep, z = this.navMin + j * this.navStep;
-      this.navFree[i * this.navN + j] = this.blockedRect(x, z, 1.0) ? 0 : 1;
+      this.navFree[i * this.navNZ + j] = this.blockedRect(x, z, 1.0) ? 0 : 1;
     }
     this.wanderPoints = [];
-    for (let i = 0; i < this.navN; i++) for (let j = 0; j < this.navN; j++) {
+    this.beachWander = [];
+    for (let i = 0; i < this.navN; i++) for (let j = 0; j < this.navNZ; j++) {
       const x = this.navMin + i * this.navStep, z = this.navMin + j * this.navStep;
-      if (this.navFree[i * this.navN + j] && Math.abs(x) < 48 && Math.abs(z) < 40) this.wanderPoints.push({ x, z });
+      if (!this.navFree[i * this.navNZ + j]) continue;
+      if (Math.abs(x) < 48 && Math.abs(z) < 40) this.wanderPoints.push({ x, z });
+      if (Math.abs(x) < 50 && z > 82 && z < 118) this.beachWander.push({ x, z });
     }
+    // v7: beach visitors arrive along the beach
+    this.beachEdges = [{ x: -62, z: 100 }, { x: 62, z: 102 }, { x: -60, z: 112 }, { x: 60, z: 110 }, { x: -62, z: 90 }, { x: 62, z: 92 }];
     // Students enter and leave over the map edges (spread over all sides)
     this.edgePoints = [
       { x: -56, z: 0 }, { x: 56, z: 0 }, { x: 0, z: 54 }, { x: -56, z: -30 }, { x: 56, z: 30 },
@@ -876,12 +1002,12 @@ class World {
 
   navCell(p) {
     let i = clamp(Math.round((p.x - this.navMin) / this.navStep), 0, this.navN - 1);
-    let j = clamp(Math.round((p.z - this.navMin) / this.navStep), 0, this.navN - 1);
-    if (this.navFree[i * this.navN + j]) return [i, j];
+    let j = clamp(Math.round((p.z - this.navMin) / this.navStep), 0, this.navNZ - 1);
+    if (this.navFree[i * this.navNZ + j]) return [i, j];
     let best = null, bd = 1e9;
     for (let di = -3; di <= 3; di++) for (let dj = -3; dj <= 3; dj++) {
       const a = i + di, b = j + dj;
-      if (a < 0 || b < 0 || a >= this.navN || b >= this.navN || !this.navFree[a * this.navN + b]) continue;
+      if (a < 0 || b < 0 || a >= this.navN || b >= this.navNZ || !this.navFree[a * this.navNZ + b]) continue;
       const d = di * di + dj * dj;
       if (d < bd) { bd = d; best = [a, b]; }
     }
@@ -890,19 +1016,20 @@ class World {
 
   findPath(from, to) {
     if (this.lineFree(from, to)) return [to];
-    const N = this.navN;
+    const N = this.navNZ, NX = this.navN;
     const [si, sj] = this.navCell(from), [ti, tj] = this.navCell(to);
     const start = si * N + sj, goal = ti * N + tj;
-    const prev = new Int32Array(N * N).fill(-1);
+    const prev = new Int32Array(NX * N).fill(-1);
     const queue = [start];
     prev[start] = start;
-    while (queue.length) {
-      const c = queue.shift();
+    let head = 0;
+    while (head < queue.length) {
+      const c = queue[head++];
       if (c === goal) break;
       const ci = Math.floor(c / N), cj = c % N;
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
         const a = ci + di, b = cj + dj;
-        if (a < 0 || b < 0 || a >= N || b >= N) continue;
+        if (a < 0 || b < 0 || a >= NX || b >= N) continue;
         const n = a * N + b;
         if (prev[n] !== -1 || !this.navFree[n]) continue;
         if (di && dj && (!this.navFree[ci * N + b] || !this.navFree[a * N + cj])) continue;

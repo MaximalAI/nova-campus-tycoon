@@ -132,7 +132,7 @@ def test_new_shops_trade_from_day_one_as_bots():
 
 def test_a_simulated_day_sells_in_the_new_shops():
     state = sim.simulate_day(sim.morning_setup(logic.new_game(seed=3)), speed=8)
-    sold = {s: state["stats"]["shops"][s]["served"] for s in NEW_SHOPS}
+    sold = {s: state["stats"]["shops"][s]["served"] for s in NEW_SHOPS if CONFIG["shops"][s]["zone"] == "campus"}
     assert all(n > 0 for n in sold.values()), sold
     assert state["summary"]["served"] > 0  # your café still has customers
 
@@ -177,7 +177,7 @@ def test_old_saves_load_and_play_a_day(name):
     state = sim.simulate_day(state, speed=8)
     assert state["day_state"] == logic.DAY_SUMMARY
     state, _ = go(state, t=21.0, type="next_day")
-    assert len(state["students"]) == CONFIG["students"]["pool_size"]
+    assert len(state["students"]) == CONFIG["students"]["pool_size"] + CONFIG["beach_visitors"]["pool_size"]
 
 
 def test_a_won_v6_game_continues_with_the_new_goal():

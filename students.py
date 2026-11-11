@@ -109,17 +109,52 @@ def make_pool(seed: int, day: int) -> dict[str, dict]:
             "zone": "campus",
         }
         complete_student(seed, day, pool[sid])
+    # v7: beach visitors (own random stream, so the campus students stay the same)
+    beach = CONFIG["beach_visitors"]
+    brng = _rng(seed, day, "beach-pool")
+    for i in range(beach["pool_size"]):
+        sid = f"b{i}"
+        pool[sid] = {
+            "id": sid, "name": beach["names"][i % len(beach["names"])], "budget": beach["budget"], "utilities": {},
+            "traits": {"walk_speed": round(brng.uniform(*S["walk_speed"]), 3),
+                       "patience": round(brng.uniform(*S["patience_minutes"]), 1),
+                       "fickleness": round(brng.uniform(*S["fickleness"]), 3)},
+            "look": {"shirt": brng.randrange(12), "pants": brng.randrange(6), "hair": brng.randrange(8), "skin": brng.randrange(5)},
+            "status": OFF_MAP, "intent": None, "purchases": [], "zone": "beach",
+        }
+        complete_student(seed, day, pool[sid])
     return pool
 
 
-def make_schedule(seed: int, day: int, phases: list[dict] | None = None) -> dict[str, dict]:
+def zone_spec(zone: str) -> tuple[list[str], list[dict], int]:
+    """Student ids, phase table and pool size of a zone."""
+    if zone == "beach":
+        b = CONFIG["beach_visitors"]
+        return [f"b{i}" for i in range(b["pool_size"])], b["phases"], b["pool_size"]
+    return [f"s{i}" for i in range(S["pool_size"])], CONFIG["phases"], S["pool_size"]
+
+
+def make_schedule(seed: int, day: int, phases: list[dict] | None = None,
+                  zones: tuple[str, ...] = ("campus",)) -> dict[str, dict]:
     """When each student is on the map and when they think about buying.
 
     The number of students on the map moves gradually (max_change_per_step)
     towards the target of the current phase and never exceeds the pool size.
+    v7: one schedule per open zone; visitors of a closed zone never come.
     """
-    rng = _rng(seed, day, "schedule")
-    ids = [f"s{i}" for i in range(S["pool_size"])]
+    schedule = _zone_schedule(seed, day, "campus", phases)
+    beach_ids, _, _ = zone_spec("beach")
+    if "beach" in zones:
+        schedule.update(_zone_schedule(seed, day, "beach"))
+    else:
+        schedule.update({sid: {"presence": [], "decisions": []} for sid in beach_ids})
+    return schedule
+
+
+def _zone_schedule(seed: int, day: int, zone: str, phases: list[dict] | None = None) -> dict[str, dict]:
+    ids, zone_phases, cap = zone_spec(zone)
+    phases = phases or zone_phases
+    rng = _rng(seed, day, "schedule") if zone == "campus" else _rng(seed, day, "schedule", zone)
     step = S["schedule_step_minutes"] / 60
     start, end = CONFIG["time"]["day_start"], CONFIG["time"]["day_end"]
     on: dict[str, float] = {}  # student -> arrival time of current visit
@@ -128,7 +163,7 @@ def make_schedule(seed: int, day: int, phases: list[dict] | None = None) -> dict
 
     t = start
     while t < end - 1e-9:
-        target = timeclock.target_students(t, phases)
+        target = timeclock.target_students(t, phases, cap)
         diff = target - len(on)
         change = min(abs(diff), S["max_change_per_step"])
         if diff > 0:
@@ -157,9 +192,10 @@ def make_schedule(seed: int, day: int, phases: list[dict] | None = None) -> dict
     return schedule
 
 
-def on_map_count(schedule: dict[str, dict], t: float) -> int:
+def on_map_count(schedule: dict[str, dict], t: float, zone: str = "campus") -> int:
+    prefix = "b" if zone == "beach" else "s"
     return sum(
-        1 for s in schedule.values() for a, b in s["presence"] if a <= t < b
+        1 for sid, s in schedule.items() if sid.startswith(prefix) for a, b in s["presence"] if a <= t < b
     )
 
 
@@ -214,5 +250,6 @@ def choose_order(student: dict, prices: dict[str, int], factors: dict[str, float
 def wants_to_visit(seed: int, day: int, student: dict, t: float) -> bool:
     """Random but reproducible: depends only on seed, day, student and game time."""
     rng = _rng(seed, day, student["id"], int(round(t * 600)))
-    p = timeclock.cafe_probability(t) * student["traits"]["fickleness"]
+    _, phases, _ = zone_spec(student.get("zone", "campus"))
+    p = timeclock.cafe_probability(t, phases) * student["traits"]["fickleness"]
     return rng.random() < p

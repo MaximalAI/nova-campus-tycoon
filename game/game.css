@@ -250,3 +250,4 @@ button.chip.toggle:disabled { opacity: .45; cursor: default; }
 #mono-bar { display: block; height: 8px; border-radius: 6px; background: #eadfcc; overflow: hidden; margin-top: 4px; }
 #mono-fill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #2a9d8f, #e9c46a); transition: width .4s; }
 .mono-row td.mine { color: var(--green-dark); font-weight: 800; }
+.mono-table th:nth-child(2), .mono-table td:nth-child(2), .mono-table th:nth-child(3), .mono-table td:nth-child(3) { text-align: left; }

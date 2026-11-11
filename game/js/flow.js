@@ -182,9 +182,39 @@ class Flow {
   }
   morningSequence() {
     const v = this.v;
+    if ((v.zone_news || []).includes("beach") && !this.beachNewsShown) {
+      this.beachNewsShown = v.day;
+      this.game.ui.toast("Beach zone unlocked");
+      return this.openBeachUnlocked(() => this.morningSequence());
+    }
+    if (v.zones_open.includes("beach") && this.forecastShown !== v.day) {
+      this.forecastShown = v.day;
+      return this.openForecast(() => this.morningSequence());
+    }
     const pending = Object.entries(v.manager_proposals || {}).filter(([, p]) => !p.done).map(([s]) => s);
+    // v7: with several managers, one summary instead of a pop-up per shop
+    if (pending.length > 1 && !this.reviewOneByOne) return this.openAllProposals(pending);
     if (pending.length) return this.openManagerProposal(pending[0], () => this.morningSequence());
+    this.reviewOneByOne = false;
     // v6: no automatic planning pop-up - walk to the planning board (the marker shows the way)
+  }
+
+  // ------------------------------------------------- P23 all proposals at once (v7)
+  openAllProposals(shops) {
+    const v = this.v;
+    const rows = shops.map((s) => ({ label: `${this.cfg.shops[s].icon || "🏪"} ${esc(this.shopName(s))}`, value: euro(v.manager_proposals[s].cost) }));
+    const total = shops.reduce((a, s) => a + v.manager_proposals[s].cost, 0);
+    rows.push({ label: "Total", value: euro(total), cls: "total" });
+    this.game.ui.showDialog({
+      id: "P23", icon: "🧑‍🍳", title: "Your managers' proposals", unique: true,
+      text: `Your managers want to buy supplies for today. Accept all, or look at each proposal. ` +
+        `<span class="sub">If you do nothing, they buy at ${fmtTime(this.cfg.time.manager_buys_at)}.</span>`,
+      rows,
+      secondary: { label: "One by one", action: () => { this.reviewOneByOne = true; setTimeout(() => this.morningSequence(), 0); } },
+      primary: { label: "Accept all", action: () => {
+        for (const s of shops) this.send("confirm_manager_plan", { shop: s }, this.ok());
+      } },
+    });
   }
 
   // ------------------------------------------------- P23 manager's proposal
@@ -235,7 +265,7 @@ class Flow {
             const stp = el("div", "stepper");
             const minus = el("button", "", "−"), plus = el("button", "", "+"), val = el("span", "", euro(prices[prod]));
             minus.onclick = () => { prices[prod] = Math.max(10, prices[prod] - 10); draw(); };
-            plus.onclick = () => { prices[prod] = Math.min(this.cfg.max_price, prices[prod] + 10); draw(); };
+            plus.onclick = () => { prices[prod] = Math.min(this.cfg.products[prod].max_price || this.cfg.max_price, prices[prod] + 10); draw(); };
             stp.append(minus, val, plus); line.appendChild(stp); right.appendChild(line);
           }
           grid.append(left, right);
@@ -419,7 +449,7 @@ class Flow {
             const stp = el("div", "stepper");
             const minus = el("button", "", "−"), plus = el("button", "", "+"), val = el("span", "", euro(prices[p]));
             minus.onclick = () => { prices[p] = Math.max(10, prices[p] - 10); draw(); };
-            plus.onclick = () => { prices[p] = Math.min(this.cfg.max_price, prices[p] + 10); draw(); };
+            plus.onclick = () => { prices[p] = Math.min(this.cfg.products[p].max_price || this.cfg.max_price, prices[p] + 10); draw(); };
             stp.append(minus, val, plus); line.appendChild(stp); body.appendChild(line);
           }
           // v7: the other shops selling the same products
@@ -433,6 +463,8 @@ class Flow {
         draw();
       },
       secondary: { label: "Cancel" },
+      extra: v.shops[shop].mech && v.shops[shop].mech.max_discount !== undefined
+        ? [{ label: "Happy hour", cls: "secondary", action: () => { this.game.ui.closeDialog(); this.openHappyHour(shop); } }] : [],
       primary: { label: "Save prices", action: () => {
         this.send("set_prices", { shop, prices }, this.ok(() => { if (!this.v.open && this.game.clock.t >= 7) this.askOpen(); }));
       } },
@@ -984,7 +1016,7 @@ class Flow {
       id: "P35", icon: "👑", title: `Monopoly ${m.done}/${m.total}`, unique: true, wide: true,
       text: `You win when every shop on the map is yours and has a manager. ${next}`,
       body: (body) => {
-        body.appendChild(el("table", "sum-table", `<tr><th>#</th><th>Shop</th><th>Zone</th><th>Owner</th><th>Runs it</th><th>Price</th></tr>${rows}`));
+        body.appendChild(el("table", "sum-table mono-table", `<tr><th>#</th><th>Shop</th><th>Zone</th><th>Owner</th><th>Runs it</th><th>Price</th></tr>${rows}`));
       },
       primary: { label: "Close" },
     });
@@ -1141,7 +1173,8 @@ class Flow {
       if (a.dIdx < 0) a.dIdx = a.decisions.length;
       if (info.status !== "off_map") {
         // continuing a saved game: put the student somewhere on campus
-        const wp = this.game.world.wanderPoints[Math.floor(hashRand(sid + t) * this.game.world.wanderPoints.length)];
+        const wps = this.zonePoints(info.zone).wander;
+        const wp = wps[Math.floor(hashRand(sid + t) * wps.length)];
         a.pos = { x: wp.x, z: wp.z }; a.figure.place(a.pos); a.figure.visible = true;
         a.mode = "idle"; a.waitUntil = t;
         a.visit = 1;
@@ -1150,13 +1183,18 @@ class Flow {
     }
   }
 
+  // v7: beach visitors stay at the beach
+  zonePoints(zone) {
+    const w = this.game.world;
+    return zone === "beach" ? { wander: w.beachWander, edges: w.beachEdges } : { wander: w.wanderPoints, edges: w.edgePoints };
+  }
   spawnPoint(a) {
-    const pts = this.game.world.edgePoints;
+    const pts = this.zonePoints(a.info.zone).edges;
     return pts[Math.floor(hashRand(a.id + ":" + a.visit) * pts.length)];
   }
 
   wanderTarget(a) {
-    const pts = this.game.world.wanderPoints;
+    const pts = this.zonePoints(a.info.zone).wander;
     const p = pts[Math.floor(Math.random() * pts.length)];
     return { x: p.x + a.offset.x * 2, z: p.z + a.offset.z * 2 };
   }
@@ -1272,7 +1310,7 @@ class Flow {
       if (["wandering", "idle", "arriving", "to_shop"].includes(a.mode) && a.pIdx < a.presence.length && t >= a.presence[a.pIdx][1]) {
         a.mode = "leaving";
         this.send("student_leave", { student: a.id }, () => {});
-        const edge = this.game.world.edgePoints.reduce((best, p) => (dist2(p, a.pos) < dist2(best, a.pos) ? p : best));
+        const edge = this.zonePoints(a.info.zone).edges.reduce((best, p) => (dist2(p, a.pos) < dist2(best, a.pos) ? p : best));
         a.walkTo(this.game.world.findPath(a.pos, edge), () => { a.mode = "off"; a.figure.visible = false; a.pIdx += 1; });
       }
       // decisions at their scheduled times
@@ -1438,12 +1476,26 @@ class Flow {
 
   // v7: station labels and use in the generated shops (several products can share a station)
   stationProducts(shop, kind) { return this.cfg.shops[shop].products.filter((p) => this.cfg.products[p].station === kind); }
+  stationExtra(shop, kind) {
+    const v = this.v;
+    if (!v || v.shops[shop].owner !== "player" || (v.current_order && v.current_order.shop === shop)) return null;
+    const ps = this.stationProducts(shop, kind);
+    if (ps.some((p) => p in (v.shops[shop].front || {}))) return "display";
+    if (v.shops[shop].mech.rentals && ps.some((p) => p in v.shops[shop].mech.rentals)) return "rentals";
+    return null;
+  }
   stationLabel(shop, kind) {
+    const extra = this.stationExtra(shop, kind);
+    if (extra === "display") return "Fill the display";
+    if (extra === "rentals") return "Rentals";
     if (this.v && this.v.shops[shop].service === "assembly") return "Assemble a bowl";
     const ps = this.stationProducts(shop, kind);
     return ps.length === 1 ? `Prepare: ${this.cfg.products[ps[0]].name}` : `${kind[0].toUpperCase()}${kind.slice(1)} station`;
   }
   useStation(shop, kind) {
+    const extra = this.stationExtra(shop, kind);
+    if (extra === "display") return this.openDisplay(shop);
+    if (extra === "rentals") return this.openRentals(shop);
     if (this.v.shops[shop].service === "assembly") return this.openAssembly(shop);
     const ps = this.stationProducts(shop, kind);
     if (ps.length === 1) return this.openStation(shop, ps[0]);
@@ -1461,6 +1513,113 @@ class Flow {
       primary: { label: "Close" },
     });
   }
+  // ------------------------------------------------------------ v7 beach: P30, P34
+  openForecast(then) {
+    const v = this.v, w = v.weather || {};
+    const wf = this.cfg.weather.wave_factor[String(w.waves)] || 1;
+    const [t0, t1] = this.cfg.weather.temperature, [f0, f1] = this.cfg.weather.temperature_factor;
+    const tf = f0 + (f1 - f0) * clamp((w.temperature - t0) / (t1 - t0), 0, 1);
+    const pct = (f) => `${f >= 1 ? "+" : ""}${Math.round((f - 1) * 100)} %`;
+    this.game.ui.showDialog({
+      id: "P30", icon: "🌊", title: `Beach forecast - day ${v.day}`, unique: true,
+      text: "Waves and temperature change what people at the beach want today.",
+      rows: [
+        { label: "Waves", value: `${"★".repeat(w.waves || 0)}${"☆".repeat(5 - (w.waves || 0))} · surfing ${pct(wf)}` },
+        { label: "Temperature", value: `${w.temperature} °C · ice cream ${pct(tf)}` },
+      ],
+      primary: { label: "OK", action: () => { if (then) setTimeout(then, 0); } },
+    });
+  }
+  openBeachUnlocked(then) {
+    this.game.ui.showDialog({
+      id: "P34", icon: "🏖️", title: "Beach zone unlocked", unique: true,
+      text: "The whole campus is yours! The gate to Carcavelos beach is open. Surf Shack, Praia Bar and Gelado Kiosk are the last shops on your way to the monopoly.",
+      secondary: { label: "Later", action: () => { if (then) setTimeout(then, 0); } },
+      primary: { label: "Show me", action: () => { this.game.openBigMap(); if (then) setTimeout(then, 0); } },
+    });
+  }
+
+  // ---------------------------------------------------------------- v7 P31 rentals
+  openRentals(shop) {
+    const v = this.v, m = v.shops[shop].mech, stock = v.shops[shop].stock, items = this.cfg.wholesale_items;
+    const rows = [];
+    for (const p of Object.keys(m.rentals)) {
+      const item = Object.keys(this.cfg.products[p].uses)[0], it = items[item];
+      const out = m.out.filter((a) => a.item === item), dry = m.drying.filter((a) => a.item === item);
+      rows.push({ label: `${it.icon} ${esc(it.name)}`, value: `${stock[item] ? stock[item].units : 0} free · ${out.length} out` +
+        (out.length ? ` (next back ${fmtTime(Math.min(...out.map((a) => a.back_at)))})` : "") +
+        (dry.length ? ` · ${dry.length} drying (dry ${fmtTime(Math.min(...dry.map((a) => a.ready_at)))})` : "") });
+    }
+    rows.push({ label: "Waves today", value: `${"★".repeat(m.waves || 0)} · demand x${(m.factor || 1).toFixed(1)}` });
+    this.game.ui.showDialog({
+      id: "P31", icon: "🏄", title: "Rentals", unique: true,
+      text: "Boards and wetsuits come back after each rental. Wetsuits have to dry before the next customer.",
+      rows, primary: { label: "Close" },
+    });
+  }
+
+  // ------------------------------------------------------------- v7 P32 happy hour
+  openHappyHour(shop) {
+    const v = this.v, m = v.shops[shop].mech;
+    let d = Math.round(m.discount * 100);
+    const start = this.cfg.shops[shop].open_hours[0];
+    const ui = this.game.ui;
+    ui.showDialog({
+      id: "P32", icon: "🍹", title: "Happy hour", unique: true,
+      text: `The bar opens at sunset (${fmtTime(start)}). In the first hour all prices are lower and more people come.`,
+      body: (body) => {
+        const draw = () => {
+          body.innerHTML = "";
+          const line = el("div", "line");
+          line.appendChild(el("div", "lbl", `<span class="ic">🏷️</span><div>Discount<div class="sub">${fmtTime(start)} - ${fmtTime(start + m.happy_hours)}</div></div>`));
+          const stp = el("div", "stepper");
+          const minus = el("button", "", "−"), plus = el("button", "", "+"), val = el("span", "", `${d} %`);
+          minus.onclick = () => { d = Math.max(0, d - 5); draw(); };
+          plus.onclick = () => { d = Math.min(Math.round(m.max_discount * 100), d + 5); draw(); };
+          stp.append(minus, val, plus); line.appendChild(stp); body.appendChild(line);
+          const ex = this.cfg.shops[shop].products.map((p) => `${this.cfg.products[p].icon} ${euro(Math.max(10, Math.floor(v.shops[shop].prices[p] * (1 - d / 100) / 10) * 10))}`).join(" · ");
+          body.appendChild(el("div", "note", `Happy hour prices: ${ex}`));
+        };
+        draw();
+      },
+      secondary: { label: "Cancel" },
+      primary: { label: "Save", action: () => this.send("set_happy_hour", { shop, discount: d / 100 }, this.ok()) },
+    });
+  }
+
+  // ------------------------------------------------------------ v7 P33 fill the display
+  openDisplay(shop) {
+    const v = this.v, s = v.shops[shop], m = s.mech, ui = this.game.ui;
+    const products = Object.keys(s.front);
+    const add = Object.fromEntries(products.map((p) => [p, Math.min(s.front_room[p] || 0, this.storageFor(shop, p), 10)]));
+    ui.showDialog({
+      id: "P33", icon: "🍨", title: "Fill the display", unique: true,
+      text: `The freezer keeps, the display melts: what you put there now melts after ${m.melt_hours} game hours.` +
+        ` Today ${m.temperature} °C (demand x${(m.factor || 1).toFixed(1)}).` + (m.next_melt ? ` Next melting: ${fmtTime(m.next_melt)}.` : ""),
+      body: (body) => {
+        const draw = () => {
+          body.innerHTML = "";
+          for (const p of products) {
+            const line = el("div", "line"), max = Math.min(s.front_room[p] || 0, this.storageFor(shop, p));
+            line.appendChild(el("div", "lbl", `<span class="ic">${this.cfg.products[p].icon}</span><div>${esc(this.cfg.products[p].name)}` +
+              `<div class="sub">in the display: ${s.front[p] || 0}/${m.capacity} · freezer makes ${this.storageFor(shop, p)}</div></div>`));
+            const stp = el("div", "stepper");
+            const minus = el("button", "", "−"), plus = el("button", "", "+"), val = el("span", "", `+${add[p]}`);
+            minus.onclick = () => { add[p] = Math.max(0, add[p] - 5); draw(); };
+            plus.onclick = () => { add[p] = Math.min(max, add[p] + 5); draw(); };
+            stp.append(minus, val, plus); line.appendChild(stp); body.appendChild(line);
+          }
+        };
+        draw();
+      },
+      secondary: { label: "Cancel" },
+      primary: { label: "Fill", action: () => {
+        const amounts = Object.fromEntries(Object.entries(add).filter(([, n]) => n > 0));
+        if (Object.keys(amounts).length) this.send("fill_front", { shop, amounts }, this.ok());
+      } },
+    });
+  }
+
   // ------------------------------------------------------ v7 Bowl Bar: P29 assemble a bowl
   openAssembly(shop) {
     const v = this.v, ui = this.game.ui, m = v.shops[shop].mech;
@@ -1684,6 +1843,12 @@ class Flow {
 
   updateGate() {
     const g = this.game, gate = g.world.gates.wholesale;
+    // v7: the beach gate opens once every campus shop is yours
+    const beach = g.world.gates.beach;
+    if (beach) {
+      const open = g.world.zoneVisible("beach");
+      beach.active = !open; beach.mesh.visible = !open; beach.sign.visible = !open;
+    }
     const inside = g.world.buildingAt(g.player.pos) === "wholesale";
     // Closed until you choose "Enter"; from inside it only blocks while unpaid goods are in the cart.
     gate.active = inside ? Object.keys(this.v?.cart || {}).length > 0 : !this.wholesaleAllowed;

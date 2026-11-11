@@ -74,6 +74,14 @@ class Mechanic:
     def on_consumed(self, state: dict, product: str) -> None:
         pass
 
+    def units_for(self, product: str, portions: int) -> int:
+        """Portions the shopping list must cover for a planned number of sales."""
+        return portions
+
+    def away_units(self, state: dict, item: str) -> int:
+        """Units of an item that are yours but not in the storage right now (rented out)."""
+        return 0
+
     def new_front_batch(self, state: dict, product: str) -> dict:
         """Extra fields of a batch put into the front (a melting time, ...)."""
         return {}
@@ -248,6 +256,203 @@ class LunchRush(Mechanic):
         return {"rush": list(self.p["rush"]), "in_rush": self.in_rush(state)}
 
 
+def weather_factor(state: dict, kind: str | None) -> float:
+    """Demand factor from today's beach weather (waves or temperature)."""
+    w = CONFIG["weather"]
+    today = state.get("weather") or {}
+    if kind == "waves" and "waves" in today:
+        return w["wave_factor"][str(today["waves"])]
+    if kind == "temperature" and "temperature" in today:
+        (t0, t1), (f0, f1) = w["temperature"], w["temperature_factor"]
+        x = max(0.0, min(1.0, (today["temperature"] - t0) / (t1 - t0)))
+        return round(f0 + (f1 - f0) * x, 4)
+    return 1.0
+
+
+class Rental(Mechanic):
+    """Surf Shack: boards and wetsuits are reusable (brief 14.3).
+
+    A rental takes one free board or wetsuit; it comes back after some game hours.
+    A wetsuit then dries before it can be rented again. A surf class needs a booked
+    instructor (bought per day). The daily wave rating changes the demand."""
+
+    def demand_factor(self, state: dict) -> float:
+        return weather_factor(state, self.p.get("weather"))
+
+    def units_for(self, product: str, portions: int) -> int:
+        if product in self.p["rentals"]:
+            return -(-portions // self.p["turns_per_day"])  # one board serves several customers a day
+        return portions
+
+    def away(self, state: dict) -> list[dict]:
+        return self.data(state).setdefault("away", [])
+
+    def away_units(self, state: dict, item: str) -> int:
+        return sum(1 for a in self.away(state) if a["item"] == item)
+
+    def on_consumed(self, state: dict, product: str) -> None:
+        rule = self.p["rentals"].get(product)
+        if not rule or not self.owned(state):
+            return
+        item = next(iter(CONFIG["products"][product]["uses"]))
+        back = state["time"] + rule["hours"]
+        self.away(state).append({"item": item, "back_at": round(back, 4),
+                                 "ready_at": round(back + rule.get("dry_hours", 0.0), 4)})
+
+    def _return(self, state: dict, item: str, n: int) -> None:
+        state["shops"][self.shop]["stock"].append({"item": item, "units": n, "age": 0})
+
+    def tick(self, state: dict) -> list[str]:
+        now = state["time"] + 1e-6
+        keep, back, dry = [], {}, {}
+        for a in self.away(state):
+            if a["ready_at"] <= now:
+                self._return(state, a["item"], 1)
+                (dry if a["ready_at"] > a["back_at"] else back)[a["item"]] = (dry if a["ready_at"] > a["back_at"] else back).get(a["item"], 0) + 1
+            else:
+                keep.append(a)
+        self.data(state)["away"] = keep
+        toasts = []
+        if self.owned(state):
+            for item, n in back.items():
+                toasts.append(f"{n}x {CONFIG['wholesale_items'][item]['name']} returned")
+            for item, n in dry.items():
+                toasts.append(f"{n}x {CONFIG['wholesale_items'][item]['name']} dry again")
+        return toasts
+
+    def end_day(self, state: dict) -> int:
+        for a in self.away(state):  # everything is back (and dry) by the next morning
+            self._return(state, a["item"], 1)
+        self.data(state)["away"] = []
+        return 0
+
+    def view(self, state: dict) -> dict:
+        now = state["time"]
+        out = [a for a in self.away(state) if a["back_at"] > now]
+        drying = [a for a in self.away(state) if a["back_at"] <= now < a["ready_at"]]
+        return {"rentals": {p: r["hours"] for p, r in self.p["rentals"].items()},
+                "out": [{"item": a["item"], "back_at": a["back_at"]} for a in out],
+                "drying": [{"item": a["item"], "ready_at": a["ready_at"]} for a in drying],
+                "waves": (state.get("weather") or {}).get("waves"), "factor": self.demand_factor(state)}
+
+
+class SunsetBar(Mechanic):
+    """Praia Bar: opens at sunset (opening hours from the lighting table). The first hour
+    is happy hour: prices are lower by the discount the player chooses, more people come."""
+
+    def discount(self, state: dict) -> float:
+        return self.data(state).get("discount", self.p["discount"])
+
+    def happy(self, state: dict) -> bool:
+        start = CONFIG["shops"][self.shop]["open_hours"][0]
+        return start - 1e-6 <= state["time"] < start + self.p["happy_hours"] - 1e-6
+
+    def price(self, state: dict, product: str, base: int) -> int:
+        if not self.happy(state):
+            return base
+        step = CONFIG["price_step"]
+        return max(step, int(base * (1 - self.discount(state)) // step) * step)
+
+    def demand_factor(self, state: dict) -> float:
+        return self.p["happy_factor"] if self.happy(state) else 1.0
+
+    def set_discount(self, state: dict, discount) -> None:
+        import logic
+
+        if isinstance(discount, bool) or not isinstance(discount, (int, float)) or not 0 <= discount <= self.p["max_discount"]:
+            raise logic.GameError(f"The discount must be between 0 and {round(self.p['max_discount'] * 100)} %.")
+        if round(discount * 100) % 5:
+            raise logic.GameError("The discount goes in steps of 5 %.")
+        if state["time"] >= CONFIG["shops"][self.shop]["open_hours"][0] - 1e-6:
+            raise logic.GameError("Set the happy hour before the bar opens.")
+        self.data(state)["discount"] = round(discount, 2)
+
+    def tick(self, state: dict) -> list[str]:
+        d = self.data(state)
+        if self.happy(state) and d.get("happy_day") != state["day"]:
+            d["happy_day"] = state["day"]
+            if self.owned(state):
+                return [self.p["toast"]]
+        return []
+
+    def objective(self, state: dict, day_state: str) -> str | None:
+        start = CONFIG["shops"][self.shop]["open_hours"][0]
+        if day_state in ("SET_PRICES", "SHOP_OPEN") and state["time"] < start:
+            return f"{CONFIG['shops'][self.shop]['name']} opens at sunset ({_hhmm(start)}). Set prices and the happy hour at the register."
+        return super().objective(state, day_state)
+
+    def view(self, state: dict) -> dict:
+        return {"discount": self.discount(state), "max_discount": self.p["max_discount"],
+                "happy": self.happy(state), "happy_hours": self.p["happy_hours"]}
+
+
+class Melting(Mechanic):
+    """Gelado Kiosk: ice cream waits in the freezer; the display melts its content after
+    a few game hours. The daily temperature changes the demand."""
+
+    front_fill = "anytime"
+
+    def front_products(self) -> set[str]:
+        return set(self.p["front"])
+
+    def front_capacity(self, product: str) -> int | None:
+        return self.p["capacity"]
+
+    def demand_factor(self, state: dict) -> float:
+        return weather_factor(state, self.p.get("weather"))
+
+    def new_front_batch(self, state: dict, product: str) -> dict:
+        return {"melt_at": round(state["time"] + self.p["melt_hours"], 4)}
+
+    def _melt(self, state: dict, until: float) -> int:
+        """Remove melted portions; returns how many melted."""
+        import logic
+
+        melted = 0
+        front = state["shops"][self.shop]["front"]
+        for product in list(front):
+            keep = []
+            for batch in front[product]:
+                if batch.get("melt_at", 99) <= until + 1e-6:
+                    melted += batch["units"]
+                    self.data(state)["melted_value"] = self.data(state).get("melted_value", 0) + round(batch["units"] * logic.unit_cost(product))
+                else:
+                    keep.append(batch)
+            front[product] = keep
+        return melted
+
+    def start_day(self, state: dict) -> None:
+        self.data(state)["melted_value"] = 0
+
+    def tick(self, state: dict) -> list[str]:
+        n = self._melt(state, state["time"])
+        if n:
+            state["stats"]["wasted"] = state["stats"].get("wasted", 0) + n
+            return [f"{n} portion{'s' if n != 1 else ''} of ice cream melted"] if self.owned(state) else []
+        return []
+
+    def manager_fill(self, state: dict) -> None:
+        """A manager keeps the display about half full (less melts)."""
+        if not state["shops"][self.shop]["manager"] or state["closed"]:
+            return
+        import logic
+
+        half = self.p["capacity"] // 2
+        logic.fill_front(state, self.shop, {p: max(0, half - logic.front_units(state, self.shop, p)) for p in self.p["front"]})
+
+    def end_day(self, state: dict) -> int:
+        self._melt(state, 99.0)  # everything in the display melts overnight
+        value = self.data(state).get("melted_value", 0)
+        self.data(state)["melted_value"] = 0
+        return value
+
+    def view(self, state: dict) -> dict:
+        front = state["shops"][self.shop]["front"]
+        next_melt = min((b["melt_at"] for bs in front.values() for b in bs if "melt_at" in b), default=None)
+        return {"capacity": self.p["capacity"], "melt_hours": self.p["melt_hours"], "next_melt": next_melt,
+                "temperature": (state.get("weather") or {}).get("temperature"), "factor": self.demand_factor(state)}
+
+
 def _hhmm(t: float) -> str:
     return f"{int(t):02d}:{round((t - int(t)) * 60):02d}"
 
@@ -258,6 +463,9 @@ MECHANICS: dict[str, type[Mechanic]] = {
     "shelves": Shelves,
     "assembly": Assembly,
     "lunch_rush": LunchRush,
+    "rental": Rental,
+    "sunset_bar": SunsetBar,
+    "melting": Melting,
 }
 
 _cache: dict[str, Mechanic] = {}

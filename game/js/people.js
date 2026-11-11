@@ -13,14 +13,45 @@ function figMat(c) {
   if (!FIG_MAT.has(c)) FIG_MAT.set(c, new THREE.MeshLambertMaterial({ color: c }));
   return FIG_MAT.get(c);
 }
+// v7: each moving body part (body with head, two legs, two arms) becomes one mesh with
+// vertex colours: 5 draw calls per person instead of 15. Same looks share the geometry.
+function mergeFigureParts(container, key) {
+  const parts = container.children.filter((c) => c.isMesh && c.userData.part);
+  if (parts.length < 2) return;
+  const cacheKey = "M:" + key;
+  let geo = FIG_GEO.get(cacheKey);
+  if (!geo) {
+    const pos = [], nor = [], col = [];
+    for (const m of parts) {
+      m.updateMatrix();
+      const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+      g.applyMatrix4(m.matrix);
+      pos.push(g.attributes.position.array); nor.push(g.attributes.normal.array);
+      const c = m.material.color, n = g.attributes.position.count, arr = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+      col.push(arr);
+      g.dispose();
+    }
+    const cat = (arrs) => { const out = new Float32Array(arrs.reduce((a, x) => a + x.length, 0)); let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; } return out; };
+    geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(cat(pos), 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(cat(nor), 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(cat(col), 3));
+    FIG_GEO.set(cacheKey, geo);
+  }
+  if (!FIG_MAT.has("vc")) FIG_MAT.set("vc", new THREE.MeshLambertMaterial({ vertexColors: true }));
+  for (const m of parts) container.remove(m);
+  const merged = new THREE.Mesh(geo, FIG_MAT.get("vc"));
+  merged.castShadow = true;
+  container.add(merged);
+}
 class Figure {
   constructor(scene, colors, opts = {}) {
     const g = new THREE.Group();
     const s = opts.scale || 1;
     const part = (geo, color, x, y, z, parent = g) => {
       const m = new THREE.Mesh(geo, figMat(color)); m.position.set(x, y, z);
-      const p = geo.parameters;
-      m.castShadow = !p.width || p.width * p.height > 0.06; // no shadows for eyes, hands and feet
+      m.userData.part = true;
       parent.add(m); return m;
     };
     const Box = (...a) => figGeo("BoxGeometry", ...a), Sphere = (...a) => figGeo("SphereGeometry", ...a), Cyl = (...a) => figGeo("CylinderGeometry", ...a);
@@ -41,7 +72,7 @@ class Figure {
     part(Box(0.13, 0.12, 0.13), colors.skin, 0, -0.6, 0, this.armR);
     g.add(this.armL, this.armR);
     part(Sphere(0.22, 14, 12), colors.skin, 0, 1.57, 0);
-    const hair = part(Sphere(0.235, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), colors.hair, 0, 1.6, -0.01);
+    part(Sphere(0.235, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), colors.hair, 0, 1.6, -0.01);
     if (opts.cap) {
       part(Cyl(0.25, 0.25, 0.1, 14), opts.cap, 0, 1.76, 0);
       part(Box(0.3, 0.04, 0.2), opts.cap, 0, 1.72, 0.2);
@@ -49,6 +80,9 @@ class Figure {
     // eyes
     part(Box(0.04, 0.05, 0.02), 0x111111, -0.08, 1.6, 0.2);
     part(Box(0.04, 0.05, 0.02), 0x111111, 0.08, 1.6, 0.2);
+    const look = [colors.shirt, colors.pants, colors.hair, colors.skin, opts.apron ? 1 : 0, opts.cap || 0].join(",");
+    mergeFigureParts(g, "body:" + look);
+    for (const [k, c] of [["legL", this.legL], ["legR", this.legR], ["armL", this.armL], ["armR", this.armR]]) mergeFigureParts(c, k + ":" + look);
     if (!FIG_MAT.has("blob")) FIG_MAT.set("blob", new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
     const shadow = new THREE.Mesh(figGeo("CircleGeometry", 0.38, 16), FIG_MAT.get("blob"));
     shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.04; g.add(shadow);
@@ -166,7 +200,7 @@ class Player {
       this.pos.x += this.vel.x * dt / n; this.pos.z += this.vel.z * dt / n;
       resolveCollisions(this.pos, 0.35, this.game.world.colliders);
     }
-    this.pos.x = clamp(this.pos.x, -64, 64); this.pos.z = clamp(this.pos.z, -64, 64);
+    this.pos.x = clamp(this.pos.x, -64, 64); this.pos.z = clamp(this.pos.z, -64, 120); // v7: the beach lies south
     const stride = dist2(before, this.pos);
     const moving = Math.hypot(this.vel.x, this.vel.z) > 0.3;
     if (moving || faceCamera) {

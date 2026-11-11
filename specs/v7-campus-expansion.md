@@ -62,3 +62,9 @@ With one competitor the game is over after about two weeks. v7 turns it into a m
 - At 8x with all students of both zones on the map the game stays smooth (frame time measured in the browser test, compared with v6).
 - In-game texts in English, no em dashes anywhere.
 - Brief (section 14) and this spec are up to date; work is on branch `v7`, one commit per step, never merged into `main`.
+
+## Result (11.11.2026)
+- 9 shops, 7 mechanics in `mechanics.py`, all values in `config.py`.
+- Balance (simulation, 30 seeds, median day of purchase): Café da Esquina 11, SnackBots 17, Mercado & Go 22, Bowl Bar 26, Nova Mensa 30, Surf Shack 35, Praia Bar 40, Gelado Kiosk 45.
+- Browser: a headless Playwright playthrough bought Café da Esquina, SnackBots and Mercado & Go through P17, refilled the machines (P25), hired the vending manager (P27), filled the shelves (P28) and scanned a customer (P09); no browser errors.
+- Tests: `tests/test_v7_model.py`, `test_v7_snackbots_mercado.py`, `test_v7_bowlbar_mensa.py`, `test_v7_victory.py`, `test_v7_beach.py`; old saves in `tests/fixtures/`.

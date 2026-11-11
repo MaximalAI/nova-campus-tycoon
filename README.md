@@ -1,6 +1,6 @@
 # Nova Campus Tycoon
 
-A 3D café management game on a university campus. Plan your day, shop at the wholesaler, set prices, serve students at the counter, upgrade your café, hire a manager and buy out the competitor until you own every café on campus.
+A 3D café management game on a university campus. Plan your day, shop at the wholesaler, set prices, serve students at the counter, upgrade your café, hire a manager and buy out the competition shop by shop until you own every shop on campus and at Carcavelos beach (v7: the monopoly race over nine shops).
 
 ## Run
 ```bash
@@ -12,6 +12,11 @@ The game opens in the browser (full window). It needs an internet connection bec
 ## Test
 ```bash
 uv run pytest
+```
+
+Balance check (plays whole games headless and prints the median day of each purchase):
+```bash
+uv run python simulation.py --campaign --seeds 30
 ```
 
 ## Controls
@@ -39,12 +44,29 @@ uv run pytest
 4. 08:00-20:00: accept orders, prepare them at the stations, hand them over. Money comes at handover.
 5. 20:00: clean the four spots, read the daily summary (today, stock, competitor, last days), next day.
 
-Hiring a manager: he cleans the café from the first evening and starts serving the next morning, proposes a shopping list and prices (pop-up), buys, serves, walks to the stations and cleans up after closing. With a manager in your café you can buy the competitor; it becomes yours the next morning and you work there yourself until you hire a manager there too (victory). After the victory you can keep playing in open mode.
+Hiring a manager: he cleans the café from the first evening and starts serving the next morning, proposes a shopping list and prices (pop-up), buys, serves, walks to the stations and cleans up after closing.
+
+## The monopoly race (v7)
+Nine shops, bought one after another. You can buy the next shop when every shop you own has a hired manager. A bought shop becomes yours the next morning; you run it yourself until you hire its manager. The HUD bar "Monopoly 3/9" shows how far you are (click it for details).
+
+| # | Shop | Zone | What is special |
+|---|---|---|---|
+| 1 | Your Café | Campus | Your start: stations, counter, cleaning |
+| 2 | Café da Esquina | Campus | The first competitor |
+| 3 | SnackBots | Campus | Vending machines: no staff, you refill them; machines break down (repair for a fee); manager at the vending office |
+| 4 | Mercado & Go | Campus | Limited shelf space: fill the shelves in the morning, scan the shopping at the register |
+| 5 | Bowl Bar | Campus | Put bowls together from ingredients; a wrong mix is a wrong order |
+| 6 | Nova Mensa | Campus | Open 11:30 to 14:30, lunch rush 12:00 to 14:00, queue of 8 |
+| 7 | Surf Shack | Beach | Boards and wetsuits come back after a rental, wetsuits dry; daily wave rating |
+| 8 | Praia Bar | Beach | Opens at sunset, happy hour with your discount |
+| 9 | Gelado Kiosk | Beach | Ice cream melts in the display; daily temperature |
+
+The beach (south of the campus) opens once every campus shop is yours. You win when all nine shops are yours and each has a manager; then you can keep playing in open mode.
 
 The game is saved after every action. Close the browser whenever you like; "Continue" on the start screen brings you back.
 
 ## Documents
 - Product brief v2 (source of truth): `docs/product-brief-v2.md`
-- Task specs: `specs/v6-fixes.md` (current), `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
+- Task specs: `specs/v7-campus-expansion.md` (current), `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
 - Architecture: `docs/architecture.md`, assumptions: `docs/assumptions.md`
 - Rules for coding agents: `AGENTS.md` (Claude Code reads `CLAUDE.md`, which imports it)

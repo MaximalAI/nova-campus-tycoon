@@ -428,7 +428,7 @@ Every NPC shop sells with fixed prices and a fixed shop factor while it belongs 
 
 ### 14.4 Students in two zones
 - Campus: the student pool grows from 25 to 40 (configurable), so nine shops still find enough customers. The lunch phase has a higher target so the Mensa rush is real.
-- Beach: a second pool of beach visitors (for example 20) with a higher budget. They only appear once the beach zone is unlocked and only walk in the beach zone. Campus students do not walk to the beach.
+- Beach: a second pool of 20 beach visitors with a higher budget (€60). They only appear once the beach zone is unlocked and only walk in the beach zone. Campus students do not walk to the beach.
 - A student visits one shop per decision. To keep the decision fast with 27 products, the student computes the best bundle per open shop (at most 3 products each) and picks the shop with the highest utility. This gives the same result as before for one-shop bundles, which is what the game already sells.
 - Shops with opening hours (Mensa, Praia Bar) are only offered to students while open.
 
@@ -444,16 +444,21 @@ HUD: a monopoly progress bar shows owned shops with a hired manager out of nine.
 
 ### 14.6 Prices and balance (starting values, calibrated by the headless simulation)
 
-| # | Shop | Acquisition | Manager |
-|---|---|---|---|
-| 2 | Café da Esquina | €300 | €100 |
-| 3 | SnackBots | €350 | €80 |
-| 4 | Mercado & Go | €450 | €100 |
-| 5 | Bowl Bar | €550 | €120 |
-| 6 | Nova Mensa | €650 | €140 |
-| 7 | Surf Shack | €900 | €150 |
-| 8 | Praia Bar | €1,100 | €150 |
-| 9 | Gelado Kiosk | €1,300 | €150 |
+Values after the calibration with the headless simulation (`uv run python simulation.py --campaign --seeds 30`: 29 of 30 games won by day 56).
+The manager of Your Café costs €100.
+
+| # | Shop | Acquisition | Manager | Simulated purchase day (median) | Target |
+|---|---|---|---|---|---|
+| 2 | Café da Esquina | €700 | €120 | 11 | 10 |
+| 3 | SnackBots | €750 | €120 | 17 | 15 |
+| 4 | Mercado & Go | €1,400 | €200 | 22 | 20 |
+| 5 | Bowl Bar | €2,000 | €250 | 26 | 25 |
+| 6 | Nova Mensa | €2,600 | €300 | 30 | 30 |
+| 7 | Surf Shack | €3,400 | €350 | 35 | 35 |
+| 8 | Praia Bar | €4,200 | €400 | 40 | 40 |
+| 9 | Gelado Kiosk | €5,000 | €400 | 45 | 45 |
+
+Other balance values of v7: the campus pool has 40 students with €28 each per day (v6: 25 with €16), the lunch phase lasts until 14:00, and the beach has 20 visitors with €60 each. Expensive beach products have their own price limit (a surf class can cost up to €60).
 
 Balance target (team decision 11.11.2026): a good player buys Café da Esquina around day 10 and every further shop about 5 days after the previous one, so the campus zone is complete around day 30 and the beach around day 45. The headless simulation plays many seeds with a simple strategy (buy as soon as allowed, hire as soon as possible) and reports the day each shop was bought; prices are adjusted until the median hits the target. Wholesale items, products, start prices and all mechanic parameters live in `config.py`.
 
@@ -477,14 +482,15 @@ Balance target (team decision 11.11.2026): a good player buys Café da Esquina a
 |---|---|---|
 | T13 | "Machine broken: Coke Zero" | A vending machine breaks |
 | T14 | "Lunch rush at the Mensa!" | 12:00 while you own or run the Mensa |
-| T15 | "Surfboard returned" | A rental comes back |
-| T16 | "Wetsuit dry again" | Drying finished |
+| T15 | "1x Surfboard returned" | A rental comes back |
+| T16 | "1x Wetsuit dry again" | Drying finished |
 | T17 | "Happy hour at Praia Bar!" | Bar opens |
-| T18 | "3 scoops melted" | Display melted |
+| T18 | "3 portions of ice cream melted" | Display melted |
 | T19 | "Beach zone unlocked" | All campus shops owned |
 | T20 | "Wrong bowl" | Assembly with a wrong set of ingredients |
 
 ### 14.8 Technical rules for v7
 - Everything new is data in `config.py`: zones, shops (order, zone, products, stations, opening hours, queue size, acquisition and manager cost, mechanic type and parameters), wholesale items (which shop unlocks them) and products. `logic.py` contains no if/else chains on shop names; mechanics are looked up by their type.
 - `logic.migrate()` loads v4, v5 and v6 saves: missing shops are added as bots, the old competitor statistics move to the new per-shop fields. A v6 save that had already won continues as a running game with the new goal.
-- Performance stays smooth at 8x with all students of both zones on the map.
+- Performance stays smooth at 8x with all students of both zones on the map: static scenery is merged into a few meshes by colour, and every person is drawn with five meshes (body, two arms, two legs) that share geometry and material.
+- At the wholesaler, every new shop has one aisle (P04 lists its items). With several managers, their morning proposals come as one summary (P23, "Accept all" or "One by one").

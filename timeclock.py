@@ -58,17 +58,19 @@ def phase_at(t: float) -> dict:
     return phases[-1] if t >= phases[-1]["from"] else phases[0]
 
 
-def target_students(t: float, phases: list[dict] | None = None) -> int:
+def target_students(t: float, phases: list[dict] | None = None, cap: int | None = None) -> int:
     """Target number of students on the map, capped at the pool size."""
     if phases is None:
         phase = phase_at(t)
     else:
         phase = next((p for p in phases if p["from"] <= t < p["to"]), phases[-1])
-    return min(phase["target"], CONFIG["students"]["pool_size"])
+    return min(phase["target"], cap if cap is not None else CONFIG["students"]["pool_size"])
 
 
-def cafe_probability(t: float) -> float:
-    return phase_at(t)["cafe_probability"]
+def cafe_probability(t: float, phases: list[dict] | None = None) -> float:
+    if phases is None:
+        return phase_at(t)["cafe_probability"]
+    return next((p for p in phases if p["from"] <= t < p["to"]), phases[-1])["cafe_probability"]
 
 
 # ---------------------------------------------------------------------------
