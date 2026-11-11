@@ -959,6 +959,37 @@ class Flow {
     });
   }
 
+  // ------------------------------------------------------------ v7 P35 monopoly
+  openMonopoly() {
+    const v = this.v;
+    if (!v) return;
+    const zones = this.cfg.zones;
+    const rows = Object.entries(this.cfg.shops).map(([key, spec]) => {
+      const s = v.shops[key];
+      const zone = zones[spec.zone] ? zones[spec.zone].name : spec.zone;
+      const locked = !v.zones_open.includes(spec.zone);
+      const owner = s.owner === "player" ? "yours" : s.sold ? "yours tomorrow" : locked ? "locked" : "competitor";
+      const staff = s.owner !== "player" ? "-" : s.manager ? "manager" : s.manager_hired ? "manager tomorrow" : "you";
+      const price = s.owner === "player" ? "-" : euro(spec.acquisition_cost);
+      const mine = s.owner === "player" && s.manager_hired;
+      return `<tr class="mono-row"><td>${spec.order}</td><td class="${mine ? "mine" : ""}">${spec.icon || "🏪"} ${esc(spec.name)}</td>` +
+        `<td>${esc(zone)}</td><td>${owner}</td><td>${staff}</td><td>${price}</td></tr>`;
+    }).join("");
+    const m = v.monopoly;
+    const next = v.next_target
+      ? (v.for_sale ? `<b>${esc(this.shopName(v.next_target))}</b> is for sale now: ${euro(this.cfg.shops[v.next_target].acquisition_cost)} (walk to its door).`
+        : `Next: <b>${esc(this.shopName(v.next_target))}</b>. ${esc(v.buy_blocker || "")}`)
+      : "Every shop is yours.";
+    this.game.ui.showDialog({
+      id: "P35", icon: "👑", title: `Monopoly ${m.done}/${m.total}`, unique: true, wide: true,
+      text: `You win when every shop on the map is yours and has a manager. ${next}`,
+      body: (body) => {
+        body.appendChild(el("table", "sum-table", `<tr><th>#</th><th>Shop</th><th>Zone</th><th>Owner</th><th>Runs it</th><th>Price</th></tr>${rows}`));
+      },
+      primary: { label: "Close" },
+    });
+  }
+
   // -------------------------------------------------------- P18 upgrades
   openUpgrades() {
     const ui = this.game.ui;

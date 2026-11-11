@@ -244,3 +244,9 @@
 button.chip.toggle { cursor: pointer; font: inherit; font-weight: 800; }
 button.chip.toggle.ok { background: #e3f6ea; }
 button.chip.toggle:disabled { opacity: .45; cursor: default; }
+/* v7: monopoly progress in the HUD (shops with a manager / all shops) */
+#mono { display: block; width: 100%; margin-top: 8px; padding: 6px 0 0; border: none; border-top: 1px solid #eadfcc;
+  background: none; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+#mono-bar { display: block; height: 8px; border-radius: 6px; background: #eadfcc; overflow: hidden; margin-top: 4px; }
+#mono-fill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #2a9d8f, #e9c46a); transition: width .4s; }
+.mono-row td.mine { color: var(--green-dark); font-weight: 800; }

@@ -15,6 +15,7 @@ class UI {
     this.$("#pause-btn").addEventListener("click", () => game.flow.openPause());
     this.$("#skip-btn").addEventListener("click", () => game.flow.skipToOpening());
     this.$("#gain").addEventListener("click", () => game.flow.openStats());
+    this.$("#mono").addEventListener("click", () => game.flow.openMonopoly());
     this.$("#minimap").addEventListener("click", () => game.openBigMap());
     this.$("#bigmap-close").addEventListener("click", () => game.closeBigMap());
     this.$("#bigmap").addEventListener("click", (e) => {
@@ -55,6 +56,11 @@ class UI {
     this.$("#rep-fill").style.width = `${v.reputation}%`;
     this.$("#rep-value").textContent = `${v.reputation} / 100`;
     this.updateRepPerks(v);
+    if (v.monopoly) {
+      const m = v.monopoly;
+      this.$("#mono-value").textContent = `${m.done}/${m.total}`;
+      this.$("#mono-fill").style.width = `${(m.done / m.total) * 100}%`;
+    }
     this.updateStock(v);
     this.updateShopPanel(v);
     const skip = g.flow.canSkipToOpening();
