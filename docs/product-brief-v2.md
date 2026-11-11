@@ -1,6 +1,6 @@
 # Nova Campus Tycoon v2: Product Brief
 
-Status: 06.11.2026. Source of truth for version 2. Replaces `docs/product-brief.md` wherever the two differ.
+Status: 11.11.2026 (updated for v7). Source of truth since version 2. Replaces `docs/product-brief.md` wherever the two differ. Section 14 describes the v7 campus expansion; where it differs from older sections, section 14 wins.
 
 ## 0. How the ideas were unified
 
@@ -23,7 +23,7 @@ Open points are listed in section 13.
 
 ## 1. Vision and principles
 
-The player runs a café on a university campus and plays every day the same loop: plan, shop at the wholesaler, set prices, serve students, close and clean up. The long-term goal is the monopoly: buy the competitor's café and staff both shops.
+The player runs a café on a university campus and plays every day the same loop: plan, shop at the wholesaler, set prices, serve students, close and clean up. The long-term goal is the monopoly: buy every shop on the map, one after another, and put a manager into each (since v7: nine shops in two zones, see section 14).
 
 Three principles apply to every feature:
 1. **Only the 3D world.** No tables, sidebars or Streamlit widgets outside the game. Title screen, HUD, dialogs and the daily summary are part of the 3D view and share one visual style.
@@ -49,6 +49,7 @@ The campus has three places, connected by walkable paths.
 | Café | Player | Start of every day, sales | Planning board, upgrade board, storage, counter, coffee machine, juice press, display case (pastel de nata), four cleaning spots, door sign |
 | Wholesaler | Game | Buying supplies | Entrance zone, one stand per item with picture sign, checkout with NPC cashier, exit |
 | Competitor café | NPC (bot) | Competition for students, can be bought later | Entrance zone with info pop-up (prices, buy offer) |
+| Seven more NPC shops (v7) | NPC (bot) until bought | Campus zone and beach zone, see section 14 | Entrance zone with P17, shop-specific stations |
 | Campus paths | - | Walking between places | Ground marker to the next objective, entrance zones as triggers |
 
 - Walking from the café to the wholesaler takes 30-45 real seconds.
@@ -254,7 +255,7 @@ Storage counts base units with their age, so spoilage per batch is exact.
 
 Each item and product needs a picture (for example `img/kaffeebohnen.png`), used in pop-ups and thought bubbles.
 
-### 9.3 Upgrades, manager and acquisition (unchanged rules from v1)
+### 9.3 Upgrades, manager and acquisition (v1 rules; extended to nine shops in section 14)
 - At the upgrade board in the café, P18 "Ausbau & Personal" offers three one-time upgrades that raise the shop utility factor (+0.15 for €60, +0.20 for €120, +0.25 for €200) and hiring a manager for €200.
 - Buying the competitor (€500) requires a manager in the player's café and is offered in P17.
 - After the purchase the player controls the competitor's prices, stock and upgrades; the wholesaler then also sells tea and croissants. Without a manager there, the player serves it in person with the same sales process.
@@ -296,6 +297,11 @@ Each item and product needs a picture (for example `img/kaffeebohnen.png`), used
 | P18 | Ausbau & Personal | Upgrade board | Upgrades, manager, shop factor | [Kaufen] [Schließen] | Upgrade or manager |
 | P19 | Spielende | Victory or game over | Result, days played, total profit | [Neues Spiel] | P00 |
 | P20 | Pause | Pause button or P | Speed, save state | [Weiter] [Speichern & beenden] | Game continues or P00 |
+| P21 | Start a new game? | "New game" with a running save | Warning that the save is replaced | [New game] [Cancel] | P00 or back |
+| P22 | Cancel this order? | Cancel button during an order | Reputation cost | [Cancel order] [Keep it] | Order cancelled |
+| P23 | Manager's proposal | Morning, shop with a working manager | Plan, prices, cost | [Confirm] [Change] | Manager buys |
+| P24 | Statistics | Click on the day gain | Charts and day figures | [Close] | - |
+| P25-P35 | v7 pop-ups | see section 14.7 | | | |
 
 ### 10.3 Toasts
 
@@ -313,6 +319,7 @@ Each item and product needs a picture (for example `img/kaffeebohnen.png`), used
 | T10 | "Erledigt" | Cleaning spot finished |
 | T11 | "Geh näher heran" | Click out of range |
 | T12 | "Bestellung pausiert - du hast das Café verlassen" | Player leaves the café with an order in progress |
+| T13-T20 | v7 toasts | see section 14.7 |
 
 ## 11. HUD and look
 
@@ -320,6 +327,7 @@ HUD (overlay inside the 3D view, same style as the pop-ups):
 - Top right: digital clock (HH:MM), day, speed buttons 1x/2x/4x/8x, pause button, balance.
 - Top center: current objective, for example "Nächstes Ziel: Zum Großhandel".
 - Top left: reputation.
+- Top left, below the reputation (v7): monopoly progress bar "Monopoly 3/9" (shops owned with a hired manager out of all shops). Clicking it opens P35.
 - Bottom: tray during opening hours; toasts above it.
 - Tab: shopping list and stock.
 
@@ -376,3 +384,107 @@ Saved state (SQLite) includes at least: day, game time, phase, money, reputation
 - [ ] Pop-up density: should tiny actions (taking a pastel) be a toast instead of a dialog? Default: dialog, as in the catalog.
 - [ ] Reputation effect on the shop factor (±20 %): keep or drop.
 - [ ] Daily price fluctuation at the wholesaler (±10 %): default off.
+
+- [x] v7 time target: first shop around day 10, then about 5 days per shop (decided 11.11.2026).
+- [x] v7: all campus NPC shops trade from day 1 (decided 11.11.2026).
+
+## 14. Version 7: campus monopoly
+
+### 14.1 Goal
+The one-competitor game becomes a campus-wide monopoly race. Every new shop is an NPC competitor that the player can buy, and every shop adds one new gameplay mechanic, not only new products. The campus zone comes first; the beach zone towards Carcavelos beach unlocks once every campus shop is owned.
+
+### 14.2 Shops and zones
+Nine shops in unlock order. Ingredients in brackets.
+
+| # | Shop | Zone | Products [ingredients] | Mechanic |
+|---|---|---|---|---|
+| 1 | Your Café | Campus | Bica [Coffee beans], Orange juice [Oranges], Pastel de nata [Pastel de nata] | Owned from the start. Unchanged. |
+| 2 | Café da Esquina | Campus | Coffee [Coffee beans], Tea [Tea leaves], Croissant [Croissants] | First acquisition target. Unchanged. |
+| 3 | SnackBots | Campus | Water [Water bottles], Coke Zero [Coke Zero cans], Protein bar [Protein bars] | Vending machines |
+| 4 | Mercado & Go | Campus | Sandwich [Bread, Cheese], Iced tea [Iced tea cans], Apple [Apples] | Limited shelf space |
+| 5 | Bowl Bar | Campus | Poke bowl [Rice, Salmon], Açaí bowl [Açaí purée], Smoothie [Fruit mix] | Assembly station |
+| 6 | Nova Mensa | Campus | Chicken with fries [Chicken, Fries], Pizza slice [Frozen pizza], Pudding [Pudding cups] | Lunch rush |
+| 7 | Surf Shack | Beach | Surfboard rental [Surfboards], Wetsuit rental [Wetsuits], Surf class [Surf instructor] | Rentals and waves |
+| 8 | Praia Bar | Beach | Beer [Draught beer], Sangria [Red wine, Fruit mix], Burger [Burger patties] | Sunset opening, happy hour |
+| 9 | Gelado Kiosk | Beach | Ice cream scoop [Ice cream], Ice lolly [Ice lollies], Iced coffee [Coffee beans, Ice cream] | Melting and temperature |
+
+Every NPC shop sells with fixed prices and a fixed shop factor while it belongs to the bot, like Café da Esquina today. Every new shop has its own low-poly building in the current style, an entrance zone with P17, a price board, a "FOR SALE" sign while it is the next shop you may buy, and an icon on the minimap and the big map.
+
+### 14.3 The seven new mechanics
+
+**SnackBots (vending machines).** Three machines (one per product) and a small office of the vending company. No staff, no queue at a counter, no preparation time: a student buys at the machine instantly if it has stock. The player refills the machines from the bag (P25); a machine holds a limited number of items. Each machine can break down at random during opening hours (chance per game hour in config). A broken machine sells nothing; the player repairs it on the spot for a fee (P26) or loses its sales until it is fixed. In the office the player can hire the SnackBots manager (P27); from the next day he refills every morning and repairs breakdowns automatically (the repair fee is still paid).
+
+**Mercado & Go (limited shelf space).** The shop has a fixed number of shelf slots (for example 60 items). Every morning the player decides in P28 how many of each product go onto the shelves; the rest stays in the storage room. Students can only buy what is on the shelves. Sandwiches are put together while stocking the shelves (one bread and one cheese each). Students pay at the register; scanning takes a short fixed time.
+
+**Bowl Bar (assembly).** The first products with two ingredients. One assembly station opens P29, where the player chooses the ingredients for the bowl (rice, salmon, açaí purée, fruit mix). The chosen set decides what lands on the tray: rice + salmon is a poke bowl, açaí purée alone is an açaí bowl, fruit mix alone is a smoothie; any other set is a "Wrong bowl" (T20) and still uses up the ingredients. Handing over a wrong bowl counts as a wrong order (existing reputation penalty). A manager always assembles correctly.
+
+**Nova Mensa (lunch rush).** The Mensa is only open from 11:30 to 14:30. During the lunch rush (12:00 to 14:00) many more students are on campus, the Mensa queue holds up to 8 students, preparation is fast and prices are low. Volume, not margin, makes the money. T14 announces the rush.
+
+**Surf Shack (rentals and waves).** Surfboards and wetsuits are bought once at the wholesaler and are reusable. A rental takes one free board or wetsuit, which comes back after some game hours (T15). A returned wetsuit first dries for a while before it can be rented again (T16). A surf class needs a booked instructor (bought per day, a few classes each). Every day has a wave rating from 1 to 5 stars (seeded), shown in P30 in the morning; it multiplies the demand for all three products.
+
+**Praia Bar (sunset and happy hour).** The bar opens when the sunset lighting phase starts (17:30, from the lighting table) and closes at 20:00 like every shop. The first hour is happy hour (T17): prices are lower by a discount the player chooses in P32, and more students want to come. Sangria shares the fruit mix with the Bowl Bar.
+
+**Gelado Kiosk (melting and temperature).** Ice cream and ice lollies wait in the freezer (no melting). The player moves portions into the display (P33); the display melts its content after a few game hours (T18 shows the loss). Every day has a temperature (seeded, for example 16 to 34 °C), shown in P30, which scales the kiosk's demand. Iced coffee uses coffee beans and ice cream.
+
+### 14.4 Students in two zones
+- Campus: the student pool grows from 25 to 40 (configurable), so nine shops still find enough customers. The lunch phase has a higher target so the Mensa rush is real.
+- Beach: a second pool of beach visitors (for example 20) with a higher budget. They only appear once the beach zone is unlocked and only walk in the beach zone. Campus students do not walk to the beach.
+- A student visits one shop per decision. To keep the decision fast with 27 products, the student computes the best bundle per open shop (at most 3 products each) and picks the shop with the highest utility. This gives the same result as before for one-shop bundles, which is what the game already sells.
+- Shops with opening hours (Mensa, Praia Bar) are only offered to students while open.
+
+### 14.5 Progression, buying rule and victory
+1. Start: you own Your Café; all campus NPC shops already trade as competitors.
+2. Campus zone: Café da Esquina, SnackBots, Mercado & Go, Bowl Bar and Nova Mensa become buyable one after another.
+3. Beach zone: unlocks (T19, P34) once you own every campus shop; then Surf Shack, Praia Bar and Gelado Kiosk become buyable in this order.
+4. Victory: you own all nine shops and every shop has a hired manager. P19 as before, with "Keep playing (open mode)".
+
+Buying rule: only the next shop in the unlock order is for sale, and only when every shop you already own has a hired manager. Hired counts (the manager may start tomorrow), so you can hire in the evening and buy the next morning. As since v6, you pay at once and the shop becomes yours the next morning; until then the bot keeps selling. You then run the new shop yourself until you hire its manager.
+
+HUD: a monopoly progress bar shows owned shops with a hired manager out of nine. P35 lists all shops with owner, manager, price and what is needed for the next purchase.
+
+### 14.6 Prices and balance (starting values, calibrated by the headless simulation)
+
+| # | Shop | Acquisition | Manager |
+|---|---|---|---|
+| 2 | Café da Esquina | €300 | €100 |
+| 3 | SnackBots | €350 | €80 |
+| 4 | Mercado & Go | €450 | €100 |
+| 5 | Bowl Bar | €550 | €120 |
+| 6 | Nova Mensa | €650 | €140 |
+| 7 | Surf Shack | €900 | €150 |
+| 8 | Praia Bar | €1,100 | €150 |
+| 9 | Gelado Kiosk | €1,300 | €150 |
+
+Balance target (team decision 11.11.2026): a good player buys Café da Esquina around day 10 and every further shop about 5 days after the previous one, so the campus zone is complete around day 30 and the beach around day 45. The headless simulation plays many seeds with a simple strategy (buy as soon as allowed, hire as soon as possible) and reports the day each shop was bought; prices are adjusted until the median hits the target. Wholesale items, products, start prices and all mechanic parameters live in `config.py`.
+
+### 14.7 New pop-ups and toasts
+
+| ID | Title | Trigger | Content | Buttons |
+|---|---|---|---|---|
+| P25 | Refill: machine | SnackBots machine | Items in machine and bag, capacity | [Refill] [Cancel] |
+| P26 | Machine broken | Broken machine | What broke, repair fee, sales lost so far | [Repair for €X] [Later] |
+| P27 | Vending company office | Office desk | Manager offer for SnackBots | [Hire] [Close] |
+| P28 | Stock the shelves | Mercado shelves, morning | Shelf slots used, per product: storage and amount for the shelf | [Fill shelves] [Cancel] |
+| P29 | Assemble a bowl | Bowl Bar station | Ingredient toggles, preview of the result, stock | [Assemble] [Cancel] |
+| P30 | Beach forecast | Morning (beach zone unlocked) or forecast board | Temperature and wave rating with their effect on demand | [OK] |
+| P31 | Rentals | Surf Shack rack | Boards and wetsuits: free, rented (back at), drying (dry at) | [Close] |
+| P32 | Happy hour | Praia Bar register | Discount for the first hour | [Save] [Cancel] |
+| P33 | Fill the display | Gelado freezer | Freezer stock, display content and melting time | [Fill] [Cancel] |
+| P34 | Beach zone unlocked | Last campus shop bought | Short text, map of the beach | [Show me] |
+| P35 | Monopoly | Click on the progress bar | All shops: owner, manager, price, next step | [Close] |
+
+| ID | Text | Trigger |
+|---|---|---|
+| T13 | "Machine broken: Coke Zero" | A vending machine breaks |
+| T14 | "Lunch rush at the Mensa!" | 12:00 while you own or run the Mensa |
+| T15 | "Surfboard returned" | A rental comes back |
+| T16 | "Wetsuit dry again" | Drying finished |
+| T17 | "Happy hour at Praia Bar!" | Bar opens |
+| T18 | "3 scoops melted" | Display melted |
+| T19 | "Beach zone unlocked" | All campus shops owned |
+| T20 | "Wrong bowl" | Assembly with a wrong set of ingredients |
+
+### 14.8 Technical rules for v7
+- Everything new is data in `config.py`: zones, shops (order, zone, products, stations, opening hours, queue size, acquisition and manager cost, mechanic type and parameters), wholesale items (which shop unlocks them) and products. `logic.py` contains no if/else chains on shop names; mechanics are looked up by their type.
+- `logic.migrate()` loads v4, v5 and v6 saves: missing shops are added as bots, the old competitor statistics move to the new per-shop fields. A v6 save that had already won continues as a running game with the new goal.
+- Performance stays smooth at 8x with all students of both zones on the map.

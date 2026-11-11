@@ -7,8 +7,8 @@ class Flow {
   constructor(game) {
     this.game = game;
     this.agents = new Map();
-    this.queues = { cafe: [], rival: [] };
-    this.auto = { cafe: null, rival: null };
+    this.queues = {};
+    this.auto = {};
     this.sentTicks = new Set();
     this.zoneFlags = {};
     this.p09For = null;
@@ -30,6 +30,9 @@ class Flow {
     return Object.keys(this.v.bag).some((i) => usable.has(i));
   }
   shopName(shop) { return this.cfg.shops[shop].name; }
+  get shopKeys() { return Object.keys(this.cfg.shops); }
+  // v7: the shop whose storage takes the goods in the bag (the shop you run first)
+  bagShop() { return this.shopKeys.find((s) => this.v.shops[s].owner === "player" && this.bagHasItemsFor(s)) || null; }
   itemLine(i, q) { const it = this.cfg.wholesale_items[i]; return `${it.icon} ${q}x ${esc(it.name)} <span class="sub">(${esc(it.unit)})</span>`; }
 
   get ws() { return this.v && this.v.work_shop; }
@@ -54,17 +57,17 @@ class Flow {
     const v = this.v;
     if (!v || this.game.ui.dialogOpen) return null;
     const ws = this.ws || "cafe";
-    const board = ws === "rival" ? { x: 5.0, z: -18.6 } : { x: -37.4, z: -4.9 };
+    const board = P[ws].planBoard;
     const pending = Object.entries(v.manager_proposals || {}).find(([, p]) => !p.done);
     if (pending && this.game.clock.t < this.cfg.time.manager_buys_at && v.day_state === "MORNING_PLANNING") {
-      return pending[0] === "rival" ? { x: 5.0, z: -18.6 } : { x: -37.4, z: -4.9 };
+      return P[pending[0]].planBoard;
     }
     if (!this.ws && !["CLOSING"].includes(v.day_state)) return null;
     switch (v.day_state) {
       case "MORNING_PLANNING": return board;
       case "WALK_TO_WHOLESALE": return Object.keys(v.bag).length ? P[ws].storage : P.wholesale.doorOut;
       case "WHOLESALE_SHOPPING": return v.in_wholesaler ? { x: 32, z: 2.3 } : P.wholesale.doorOut;
-      case "WALK_TO_CAFE": return this.bagHasItemsFor(ws) ? P[ws].storage : P[ws === "cafe" ? "rival" : "cafe"].storage;
+      case "WALK_TO_CAFE": { const b = this.bagHasItemsFor(ws) ? ws : this.bagShop(); return b ? P[b].storage : P[ws].storage; }
       case "SET_PRICES": return P[ws].register;
       case "SHOP_OPEN": return this.game.isManual(ws) && !this.playerIn(ws) ? P[ws].serve : null;
       case "CLOSING": {
@@ -166,8 +169,9 @@ class Flow {
     let text = v.day === 1
       ? "Welcome to campus! You run the café on the left. Plan your day at the <b>planning board</b>, buy supplies at the <b>wholesaler</b> and open at 08:00. Click the minimap to travel quickly."
       : "A new day begins. What do you want to sell today?";
-    if (ws === "rival" && v.shops.cafe.manager) text = `Your manager runs your first café now. You start today in <b>${esc(this.shopName("rival"))}</b>: plan, shop and serve there yourself until you hire a manager for it too.`;
-    if (!ws) text = "Your managers run your cafés. Check their proposals, then save up for the next step.";
+    if (ws && ws !== "cafe" && v.shops.cafe.manager) text = `Your managers run your other shops now. You start today in <b>${esc(this.shopName(ws))}</b>: plan, shop and serve there yourself until you hire a manager for it too.`;
+    if (!ws) text = v.next_target ? `Your managers run your shops. Check their proposals, then save up for <b>${esc(this.shopName(v.next_target))}</b>.`
+      : "Your managers run every shop on the map.";
     this.game.ui.showDialog({
       id: "P01", icon: "🌅", title: `Good morning, day ${v.day}`, unique: true,
       text, rows,
@@ -417,9 +421,12 @@ class Flow {
             plus.onclick = () => { prices[p] = Math.min(this.cfg.max_price, prices[p] + 10); draw(); };
             stp.append(minus, val, plus); line.appendChild(stp); body.appendChild(line);
           }
-          if (v.shops.rival.owner === "bot") {
-            const rp = v.shops.rival.prices;
-            body.appendChild(el("div", "note", "Competitor: " + Object.entries(rp).map(([p, c]) => `${this.cfg.products[p].icon} ${euro(c)}`).join(" · ")));
+          // v7: the other shops selling the same products
+          const rivals = this.shopKeys.filter((o) => o !== shop && v.shops[o].owner === "bot" &&
+            this.cfg.shops[o].products.some((p) => p in prices));
+          for (const o of rivals) {
+            const rp = Object.entries(v.shops[o].prices).filter(([p]) => p in prices);
+            body.appendChild(el("div", "note", `${esc(this.shopName(o))}: ` + rp.map(([p, c]) => `${this.cfg.products[p].icon} ${euro(c)}`).join(" · ")));
           }
         };
         draw();
@@ -442,7 +449,7 @@ class Flow {
         primary: { label: "⏩ Start the day", action: () => this.skipToOpening() },
       });
     }
-    const waiting = this.queues.cafe.length;
+    const waiting = (this.queues[this.ws || "cafe"] || []).length;
     this.game.ui.showDialog({
       id: "P08", icon: "🚪", title: "Open the café?", unique: true,
       text: this.game.clock.t < 7 ? "You can open from 07:00. At 08:00 the café opens automatically."
@@ -525,8 +532,8 @@ class Flow {
     const needed = order.items.filter((p) => p === product).length - v.tray.filter((p) => p === product).length;
     let bar = null;
     const dlg = {
-      id: ids[product], icon: spec.icon, title: titles[product],
-      text: steps[product] + (needed <= 0 ? `<div class="warn">This is not (or no longer) part of the order!</div>` : ""),
+      id: ids[product] || "P10", icon: spec.icon, title: titles[product] || `Prepare: ${spec.name}`,
+      text: (steps[product] || esc(spec.description)) + (needed <= 0 ? `<div class="warn">This is not (or no longer) part of the order!</div>` : ""),
       body: (body) => {
         const pb = el("div", "progress"); bar = el("div"); pb.appendChild(bar); body.appendChild(pb);
         body.appendChild(el("div", "note", `Takes ${spec.prep_minutes} game minute${spec.prep_minutes === 1 ? "" : "s"}`));
@@ -536,7 +543,7 @@ class Flow {
       secondary: { label: "Cancel", action: () => {
         if (dlg.busy) { this.progress = null; dlg.busy = false; this.game.ui.toast(`${spec.name} cancelled - nothing used`); }
       } },
-      primary: { label: verbs[product], action: () => {
+      primary: { label: verbs[product] || "Prepare", action: () => {
         dlg.busy = true;
         this.game.ui.primaryButton.disabled = true;
         this.progress = { minutes: spec.prep_minutes, done: 0, bar: () => bar, onDone: () => {
@@ -780,7 +787,7 @@ class Flow {
     const products = this.cfg.products;
     const c = s.competitor;
     if (!c) {
-      box.appendChild(el("div", "note", `You own ${esc(this.shopName("rival"))}. Its numbers are part of your results now (see Today and Stock).`));
+      box.appendChild(el("div", "note", "You own every shop on the map. Their numbers are part of your results (see Today and Stock)."));
       return;
     }
     const share = (rev) => (s.revenue + c.revenue ? Math.round(rev / (s.revenue + c.revenue) * 100) : 0) + " %";
@@ -886,8 +893,8 @@ class Flow {
           ])));
           grid.appendChild(el("div", "", `<div class="sum-h">🙋 Customers</div>` + this.table(["", ""], [
             ["Served", t.served || 0], ["Lost", t.lost || 0], ["Market share", `${Math.round((t.market_share || 0) * 100)} %`],
-            ["Competitor served", v.shops.rival.owner === "bot" ? t.rival_served || 0 : "-"],
-            ["Competitor sales", v.shops.rival.owner === "bot" ? euro(t.rival_revenue || 0) : "-"],
+            ["Other shops served", t.bot_served || 0],
+            ["Other shops' sales", euro(t.rival_revenue || 0)],
             ["Reputation", `${v.reputation} / 100`],
           ])));
           content.appendChild(grid);
@@ -907,21 +914,26 @@ class Flow {
   }
 
   // -------------------------------------------------------- P17 competitor
-  openCompetitor() {
-    const v = this.v;
-    const prices = Object.entries(v.shops.rival.prices).map(([p, c]) => ({ label: `${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}`, value: euro(c) }));
-    const can = v.can_buy_competitor;
+  // v7: every shop you do not own. The next one in the buying order can be bought.
+  openCompetitor(shop) {
+    const v = this.v, s = v.shops[shop], spec = this.cfg.shops[shop];
+    const prices = Object.entries(s.prices).map(([p, c]) => ({ label: `${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}`, value: euro(c) }));
+    const cost = spec.acquisition_cost;
+    const can = v.for_sale === shop;
+    const next = v.next_target === shop;
+    const hours = spec.open_hours ? ` Open ${fmtTime(spec.open_hours[0])} to ${fmtTime(spec.open_hours[1])}.` : "";
     this.game.ui.showDialog({
-      id: "P17", icon: "🏪", title: `Competitor - ${this.shopName("rival")}`, unique: true,
-      text: v.rival_sold ? "The contract is signed. The café becomes yours tomorrow morning - then you run it yourself."
-        : can ? `The owner is willing to sell for <b>${euro(this.cfg.acquisition_cost)}</b>. It becomes yours tomorrow morning: the barista leaves, ` +
-          `you run this café yourself while your manager runs the old one. Hire a manager here too and the campus is yours.`
-        : `The competitor has fixed prices and a good reputation (factor ${v.shops.rival.factor.toFixed(2)}). ` +
-          `Once you have hired a manager for your café, you can buy it for ${euro(this.cfg.acquisition_cost)}.`,
+      id: "P17", icon: spec.icon || "🏪", title: `Competitor - ${this.shopName(shop)}`, unique: true,
+      text: s.sold ? "The contract is signed. The shop becomes yours tomorrow morning - then you run it yourself."
+        : can ? `The owner is willing to sell for <b>${euro(cost)}</b>. It becomes yours tomorrow morning: the staff leaves and ` +
+          `you run it yourself while your managers run your other shops. Hire a manager here too, then the next shop is for sale.${hours}`
+        : next ? `${esc(v.buy_blocker || "")} Then you can buy it for ${euro(cost)}.${hours}`
+          : `Shop ${spec.order} of ${Object.keys(this.cfg.shops).length} on your way to the monopoly. ` +
+            `First buy ${esc(this.shopName(v.next_target))}. Price: ${euro(cost)}.${hours}`,
       rows: prices,
       secondary: can ? { label: "Later" } : null,
-      primary: can ? { label: "Buy the café", disabled: v.money < this.cfg.acquisition_cost,
-        action: () => { this.send("buy_competitor", {}, this.ok(() => this.checkEnd())); } } : { label: "OK" },
+      primary: can ? { label: `Buy for ${euro(cost)}`, disabled: v.money < cost,
+        action: () => { this.send("buy_shop", { shop }, this.ok(() => this.checkEnd())); } } : { label: "OK" },
     });
   }
 
@@ -930,7 +942,7 @@ class Flow {
     const ui = this.game.ui;
     const dlg = {
       id: "P18", icon: "🛠️", title: "Upgrades & staff", wide: true,
-      text: "Upgrades make your café more attractive (utility factor). A manager runs a café on his own from the next day.",
+      text: "Upgrades make your shops more attractive (utility factor). A manager runs a shop on his own from the next day.",
       body: (body) => {
         const v = this.v;
         for (const shop of Object.keys(v.shops)) {
@@ -950,13 +962,14 @@ class Flow {
             body.appendChild(line);
           }
           const line = el("div", "line");
-          const what = shop === "rival" ? "takes over the second café - completes your monopoly" : "starts tomorrow: serves, shops, sets prices and cleans";
-          line.appendChild(el("div", "lbl", `<span class="ic">🧑‍🍳</span><div>Manager<div class="sub">${what} · ${euro(this.cfg.manager_cost)}</div></div>`));
+          const cost = this.cfg.shops[shop].manager_cost || this.cfg.manager_cost;
+          const what = "starts tomorrow: shops, sets prices, serves" + (shop === "cafe" ? " and cleans" : "");
+          line.appendChild(el("div", "lbl", `<span class="ic">🧑‍🍳</span><div>Manager<div class="sub">${what} · ${euro(cost)}</div></div>`));
           if (v.shops[shop].manager) line.appendChild(el("span", "chip ok", "✔ working"));
           else if (v.shops[shop].manager_hired) line.appendChild(el("span", "chip ok", "✔ starts tomorrow"));
           else {
             const b = el("button", "btn primary", "Hire");
-            b.disabled = v.money < this.cfg.manager_cost;
+            b.disabled = v.money < cost;
             b.onclick = () => this.send("hire_manager", { shop }, this.ok(() => { ui.refreshDialog(); this.checkEnd(); }));
             line.appendChild(b);
           }
@@ -982,7 +995,7 @@ class Flow {
     const v = this.v, win = v.status === "victory";
     this.game.ui.showDialog({
       id: "P19", icon: win ? "🏆" : "💸", title: win ? "Monopoly reached!" : "Bankrupt!", unique: true, noEsc: true, urgent: true,
-      text: win ? `Both cafés are yours and run with managers. You took over the campus in <b>${v.day} day${v.day === 1 ? "" : "s"}</b>.`
+      text: win ? `Every shop on the map is yours and runs with a manager. You built the monopoly in <b>${v.day} day${v.day === 1 ? "" : "s"}</b>.`
         : "Your cash dropped to €0.00 or below at the end of the day.",
       rows: [{ label: "Days played", value: String(v.day) }, { label: "Total profit", value: euro(v.total_profit) }],
       // v6: after winning you can keep playing without a goal
@@ -1015,7 +1028,7 @@ class Flow {
   }
 
   // ------------------------------------------------------------------ events
-  onOpened() { for (const s of ["cafe", "rival"]) this.repositionQueue(s); }
+  onOpened() { for (const s of this.shopKeys) this.repositionQueue(s); }
 
   sendTicks() {
     const t = this.game.clock.t;
@@ -1039,7 +1052,7 @@ class Flow {
     const ui = this.game.ui;
     if (ui.current && ["P09", "P10", "P11", "P12", "P13"].includes(ui.current.id)) { ui.current.busy = false; this.progress = null; ui.closeDialog(); }
     ui.queue = ui.queue.filter((d) => !["P09", "P13"].includes(d.id));
-    for (const shop of ["cafe", "rival"]) {
+    for (const shop of this.shopKeys) {
       for (const sid of [...this.queues[shop]]) {
         const a = this.agents.get(sid);
         this.removeFromQueue(shop, sid);
@@ -1054,8 +1067,8 @@ class Flow {
   resetDay(plan, view) {
     for (const a of this.agents.values()) this.game.scene.remove(a.figure.group);
     this.agents.clear();
-    this.queues = { cafe: [], rival: [] };
-    this.auto = { cafe: null, rival: null };
+    this.queues = Object.fromEntries(this.shopKeys.map((s) => [s, []]));
+    this.auto = Object.fromEntries(this.shopKeys.map((s) => [s, null]));
     this.sentTicks = new Set(TICKS.filter((m) => view.time > m + 1e-6 || (m === 8 && view.open) || (m === 20 && view.closed)));
     this.zoneFlags = {};
     this.p09For = null;
@@ -1115,7 +1128,7 @@ class Flow {
   reachShop(a) {
     const shop = a.shop;
     if (this.v.closed) return this.startWander(a);
-    if (this.queues[shop].length >= this.cfg.max_queue) {
+    if (this.queues[shop].length >= (this.cfg.shops[shop].max_queue || this.cfg.max_queue)) {
       return this.send("queue_full", { student: a.id, shop }, (r) => this.handleDecision(a, r.ok ? r.result : null));
     }
     this.queues[shop].push(a.id); // reserve the slot right away
@@ -1163,7 +1176,7 @@ class Flow {
       const pts = [];
       if (open && !a.inside) { pts.push(P[shop].doorOut, P[shop].doorIn); a.inside = true; }
       pts.push(spot);
-      a.walkTo(pts, () => a.faceTo(shop === "cafe" ? { x: -40, z: spot.z } : { x: spot.x, z: -30 }));
+      a.walkTo(pts, () => a.faceTo(P[shop].face(spot)));
     });
   }
 
@@ -1232,7 +1245,7 @@ class Flow {
       }
       a.update(dtReal * speed);
     }
-    for (const shop of ["cafe", "rival"]) this.updateCounter(shop, dtGameMin);
+    for (const shop of this.shopKeys) this.updateCounter(shop, dtGameMin);
     if (this.liveBar && this.game.ui.current?.id === this.liveBar.id) this.liveBar.paint();
   }
 
@@ -1265,8 +1278,16 @@ class Flow {
     if (v.shops[shop].auto) {
       // Staff (the competitor's barista or your manager) walk to the station of every
       // product, prepare it, come back to the counter, and the student pays at once.
+      // v7: a vending machine has no staff - the student just takes the products.
       const worker = this.game.workers[shop];
-      if (!this.auto[shop] || this.auto[shop].sid !== sid) {
+      if (!worker && (!this.auto[shop] || this.auto[shop].sid !== sid)) {
+        if (a.mode !== "queue") return;
+        const job = { sid, ready: false, sent: false, at: this.game.clock.t + 0.4 / 60 };
+        this.auto[shop] = job; a.mode = "served"; a.order = a.wanted || [];
+        a.emote = { icon: "🪙", until: performance.now() + 1200 };
+      }
+      if (!worker) { if (this.game.clock.t >= this.auto[shop].at) this.auto[shop].ready = true; }
+      else if (!this.auto[shop] || this.auto[shop].sid !== sid) {
         if (a.mode !== "queue" || worker.busy) return;
         const items = a.wanted || [];
         const job = { sid, ready: false, sent: false };
@@ -1282,8 +1303,8 @@ class Flow {
             left[p] -= 1;
           }
           const st = this.stationOf(shop, p);
-          if (st) steps.push({ walk: st }, { face: { x: st.x + (shop === "cafe" ? -3 : 0), z: st.z + (shop === "cafe" ? 0 : -3) } });
-          const [kind, icon, text] = work[p] || ["coffee", "⚙️", "Preparing"];
+          if (st) steps.push({ walk: st }, { face: this.stationFace(shop, st) });
+          const [kind, icon, text] = work[p] || ["coffee", this.cfg.products[p].icon, `Preparing: ${this.cfg.products[p].name}`];
           steps.push({ wait: Math.max(0.5, this.cfg.products[p].prep_minutes), work: kind, icon, text });
         }
         steps.push({ walk: worker.home }, { face: a.pos }, { call: () => { job.ready = true; } });
@@ -1344,8 +1365,70 @@ class Flow {
   stationOf(shop, product) {
     const ids = { cafe: { coffee: "station_cafe_coffee", orange_juice: "station_cafe_juice", pastel_de_nata: "station_cafe_nata" },
       rival: { coffee: "station_rival_coffee", tea: "station_rival_tea", croissant: "station_rival_croissant" } };
-    const it = this.game.world.interactables.find((i) => i.id === ids[shop][product]);
-    return it ? it.pos : null;
+    if (ids[shop]) {
+      const it = this.game.world.interactables.find((i) => i.id === ids[shop][product]);
+      return it ? it.pos : null;
+    }
+    // v7: generated shops: one station per kind; products without a station need no walk
+    const kind = this.cfg.products[product].station;
+    return (kind && P[shop].stationAt && P[shop].stationAt[kind]) || null;
+  }
+  // where staff look while working at a station (towards the back wall)
+  stationFace(shop, st) {
+    if (shop === "cafe") return { x: st.x - 3, z: st.z };
+    if (shop === "rival") return { x: st.x, z: st.z - 3 };
+    const f = P[shop].frame;
+    return { x: st.x + f.inn.x * 3, z: st.z + f.inn.z * 3 };
+  }
+
+  // v7: station labels and use in the generated shops (several products can share a station)
+  stationProducts(shop, kind) { return this.cfg.shops[shop].products.filter((p) => this.cfg.products[p].station === kind); }
+  stationLabel(shop, kind) {
+    const ps = this.stationProducts(shop, kind);
+    return ps.length === 1 ? `Prepare: ${this.cfg.products[ps[0]].name}` : `${kind[0].toUpperCase()}${kind.slice(1)} station`;
+  }
+  useStation(shop, kind) {
+    const ps = this.stationProducts(shop, kind);
+    if (ps.length === 1) return this.openStation(shop, ps[0]);
+    const order = this.v.current_order;
+    if (!order || order.shop !== shop) return this.game.ui.toast("Take an order at the counter first.");
+    this.game.ui.showDialog({
+      id: "P10", icon: "🍽️", title: "What do you prepare?", unique: true,
+      body: (body) => {
+        for (const p of ps) {
+          const b = el("button", "btn secondary", `${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}`);
+          b.onclick = () => { this.game.ui.closeDialog(); setTimeout(() => this.openStation(shop, p), 0); };
+          body.appendChild(b);
+        }
+      },
+      primary: { label: "Close" },
+    });
+  }
+  // filled in by the mechanics of the new shops (vending machines, shelves, office)
+  machineLabel() { return null; }
+  useMachine() {}
+  shelfLabel() { return null; }
+  openShelves() {}
+  openOffice() { this.openUpgrades(); }
+
+  // ----------------------------------------------- v7 aisle at the wholesaler (P04 per item)
+  openAisle(shop) {
+    const items = [...new Set(this.cfg.shops[shop].products.flatMap((p) => Object.keys(this.cfg.products[p].uses)))]
+      .filter((i) => this.v.items_available.includes(i));
+    this.game.ui.showDialog({
+      id: "P04", icon: this.cfg.shops[shop].icon || "📦", title: `Aisle: ${this.shopName(shop)}`, unique: true,
+      text: "Pick an item.",
+      body: (body) => {
+        for (const i of items) {
+          const it = this.cfg.wholesale_items[i];
+          const inCart = this.v.cart[i] ? ` · ${this.v.cart[i]} in cart` : "";
+          const b = el("button", "btn secondary", `${it.icon} ${esc(it.name)} <span class="sub">${euro(it.price)} / ${esc(it.unit)}${inCart}</span>`);
+          b.onclick = () => { this.game.ui.closeDialog(); setTimeout(() => this.openItem(i), 0); };
+          body.appendChild(b);
+        }
+      },
+      primary: { label: "Close" },
+    });
   }
   // Teleporting out of the wholesaler (big map) counts as leaving it.
   leftWholesaleByMap() {
@@ -1373,9 +1456,12 @@ class Flow {
       if (!inside) this.zoneFlags[name] = false;
     };
     zone("wholesale_entry", !inWholesale && p.x > 23.6 && p.x < 27.8 && Math.abs(p.z) < 3 && !this.wholesaleAllowed, () => this.askWholesale());
-    zone("rival_entry", p.x > -3.2 && p.x < 3.2 && p.z > -15.8 && p.z < -11.5 && v.shops.rival.owner === "bot", () => this.openCompetitor());
-    zone("cafe_bag", g.world.buildingAt(p) === "cafe" && this.bagHasItemsFor("cafe"), () => this.openStock("cafe"));
-    zone("rival_bag", g.world.buildingAt(p) === "rival" && v.shops.rival.owner === "player" && this.bagHasItemsFor("rival"), () => this.openStock("rival"));
+    const inside = g.world.buildingAt(p);
+    for (const shop of this.shopKeys) {
+      const e = P[shop].entry;
+      if (e && v.shops[shop].owner === "bot") zone(shop + "_entry", !inside && dist2(p, e) < 2.4, () => this.openCompetitor(shop));
+      zone(shop + "_bag", inside === shop && v.shops[shop].owner === "player" && this.bagHasItemsFor(shop), () => this.openStock(shop));
+    }
     zone("gate_hint", inWholesale && p.x < 29.3 && Math.abs(p.z) < 2 && Object.keys(v.cart).length > 0,
       () => g.ui.toast("You still have unpaid goods in your cart - pay at the checkout first!", true));
     const order = v.current_order;

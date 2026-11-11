@@ -244,20 +244,21 @@ class StaffAgent extends StudentAgent {
     this.activity = null; if (this.figure) this.figure.work = null;
     this.pos = { x: this.home.x, z: this.home.z };
     this.figure.place(this.pos);
-    this.faceTarget = this.shop === "cafe" ? Math.PI / 2 : Math.PI;
+    const hf = P[this.shop].homeFace;
+    this.faceTarget = Math.atan2(hf.x - this.home.x, hf.z - this.home.z);
   }
   anchored() { return true; }
   // Behind the counter or in front of it? Crossing sides goes through the gap at the end of the counter.
-  behind(p) { return this.shop === "cafe" ? p.x < -34.9 : p.z < -21.0; }
+  behind(p) { return P[this.shop].behind(p); }
   route(from, to) {
     if (this.behind(from) === this.behind(to)) return [to];
-    const gap = this.shop === "cafe" ? [{ x: -36.2, z: 4.4 }, { x: -33.6, z: 4.4 }] : [{ x: 4.5, z: -22.2 }, { x: 4.5, z: -19.8 }];
+    const gap = P[this.shop].gap;
     return this.behind(from) ? [gap[0], gap[1], to] : [gap[1], gap[0], to];
   }
   get busy() { return this.steps.length > 0 || this.path.length > 0; }
   // steps: {walk: point} | {wait: game minutes} | {face: point} | {call: fn}
   run(steps, job) { this.steps = steps.slice(); this.job = job || null; this.path = []; this.waitLeft = 0; }
-  stop() { this.activity = null; this.figure.work = null; this.steps = [{ walk: this.home }, { face: { x: this.home.x + (this.shop === "cafe" ? 5 : 0), z: this.home.z + (this.shop === "cafe" ? 0 : 5) } }]; this.job = null; this.path = []; }
+  stop() { this.activity = null; this.figure.work = null; this.steps = [{ walk: this.home }, { face: P[this.shop].homeFace }]; this.job = null; this.path = []; }
   tick(dtScaled, dtGameMin) {
     const v = this.game.view;
     // v6: a newly hired manager already comes in for the cleaning on his first evening

@@ -23,7 +23,7 @@ def rich_with_manager():
 
 def test_objective_while_the_purchase_is_pending():
     state = rich_with_manager()
-    assert "buy the competitor" in logic.objective(state)
+    assert "buy the next shop: " + CONFIG["shops"]["rival"]["name"] in logic.objective(state)
     state, _ = go(state, 9.0, type="buy_competitor")
     text = logic.objective(state)
     assert "Tomorrow you start in" in text and CONFIG["shops"]["rival"]["name"] in text
@@ -54,14 +54,16 @@ def test_competitor_keeps_selling_on_the_day_of_the_purchase():
 
 def test_victory_dialog_can_be_followed_by_open_mode():
     state = rich_with_manager()
-    state, _ = go(state, 9.0, type="buy_competitor")
-    state = next_day(state)
-    state, _ = go(state, 9.0, type="hire_manager", shop="rival")
+    state["money"] = 10_000_000
+    for shop in logic.SHOP_ORDER[1:]:
+        state, _ = go(state, 9.0, type="buy_shop", shop=shop)
+        state = next_day(state)
+        state, _ = go(state, 9.0, type="hire_manager", shop=shop)
     assert state["status"] == logic.VICTORY
     state, _ = go(state, 9.1, type="continue_open_mode")
     state = next_day(state)
     assert state["status"] == logic.RUNNING
-    assert logic.objective(state) == "Your managers run both cafés."
+    assert logic.objective(state) == "Your managers run every shop on the map."
 
 
 def test_a_newly_hired_manager_already_cleans_tonight():

@@ -50,12 +50,12 @@ def test_format_time():
     [
         (6.0, "Night", 0, 0.0),
         (7.75, "Early morning", 3, 0.9),
-        (8.5, "Morning rush", 18, 0.8),
-        (10.0, "Morning lectures", 12, 0.85),
-        (12.5, "Lunch break", 25, 0.9),
-        (14.0, "Afternoon lectures", 12, 0.85),
-        (16.5, "Late afternoon", 14, 0.75),
-        (18.5, "Evening", 8, 0.8),
+        (8.5, "Morning rush", 24, 0.8),
+        (10.0, "Morning lectures", 16, 0.85),
+        (12.5, "Lunch break", 40, 0.9),  # v7: lunch rush 12:00 to 14:00
+        (14.0, "Afternoon lectures", 14, 0.85),
+        (16.5, "Late afternoon", 18, 0.75),
+        (18.5, "Evening", 10, 0.8),
         (20.5, "Closed", 0, 0.0),
     ],
 )
@@ -68,16 +68,16 @@ def test_phase_table(t, name, target, prob):
 
 @pytest.mark.parametrize(
     "t, name", [(7.5, "Early morning"), (8.0, "Morning rush"), (9.0, "Morning lectures"), (12.0, "Lunch break"),
-                (13.5, "Afternoon lectures"), (16.0, "Late afternoon"), (18.0, "Evening"),
+                (14.0, "Afternoon lectures"), (16.0, "Late afternoon"), (18.0, "Evening"),
                 (20.0, "Closed"), (21.0, "Closed")],
 )
 def test_phase_boundaries_belong_to_the_next_phase(t, name):
     assert tc.phase_at(t)["name"] == name
 
 
-def test_target_is_capped_at_25():
-    phases = [{"name": "x", "from": 5.0, "to": 21.0, "target": 40, "cafe_probability": 1.0}]
-    assert tc.target_students(12.0, phases) == 25
+def test_target_is_capped_at_the_pool_size():
+    phases = [{"name": "x", "from": 5.0, "to": 21.0, "target": 60, "cafe_probability": 1.0}]
+    assert tc.target_students(12.0, phases) == 40
 
 
 @pytest.mark.parametrize(

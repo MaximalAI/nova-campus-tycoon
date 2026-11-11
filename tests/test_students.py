@@ -14,13 +14,15 @@ def schedule():
     return st.make_schedule(seed=7, day=1)
 
 
-def test_pool_has_25_students_with_budget_utilities_and_traits():
+def test_pool_has_40_students_with_budget_utilities_and_traits():
     pool = st.make_pool(seed=1, day=1)
-    assert len(pool) == 25
+    assert len(pool) == CONFIG["students"]["pool_size"] == 40  # v7: 25 -> 40
     for s in pool.values():
         assert s["budget"] == CONFIG["students"]["budget"]
-        assert len(s["utilities"]) == 6
-        assert all(30 <= u <= 300 for u in s["utilities"].values())
+        assert len(s["utilities"]) == len(st.all_offerings())
+        for key, u in s["utilities"].items():
+            lo, hi = CONFIG["products"][key.split(":")[1]].get("utility", (30, 300))
+            assert lo <= u <= hi
         assert 30 <= s["traits"]["patience"] <= 60
         assert s["status"] == st.OFF_MAP
 
@@ -31,10 +33,10 @@ def test_utilities_are_new_every_day_and_reproducible():
     assert st.make_pool(1, 1) == day1
 
 
-def test_never_more_than_25_on_the_map(schedule):
+def test_never_more_than_the_pool_on_the_map(schedule):
     t = 5.0
     while t < 21.0:
-        assert st.on_map_count(schedule, t) <= 25
+        assert st.on_map_count(schedule, t) <= CONFIG["students"]["pool_size"]
         t += 1 / 60
 
 
@@ -42,7 +44,7 @@ def test_cap_holds_even_when_the_phase_table_asks_for_more():
     phases = [{"name": "x", "from": 5.0, "to": 21.0, "target": 60, "cafe_probability": 1.0}]
     schedule = st.make_schedule(seed=3, day=1, phases=phases)
     for minute in range(0, 16 * 60, 5):
-        assert st.on_map_count(schedule, 5.0 + minute / 60) <= 25
+        assert st.on_map_count(schedule, 5.0 + minute / 60) <= CONFIG["students"]["pool_size"]
 
 
 @pytest.mark.parametrize("t", [7.9, 8.75, 10.5, 13.0, 15.0, 17.0, 19.0])
@@ -52,9 +54,9 @@ def test_count_stays_close_to_the_phase_target(schedule, t):
 
 def test_lunch_peak_is_clearly_higher(schedule):
     lunch = st.on_map_count(schedule, 12.5)
-    assert lunch >= 20
+    assert lunch >= 35  # v7: the lunch rush brings the whole pool of 40
     assert lunch > st.on_map_count(schedule, 10.0) + 10
-    assert lunch > st.on_map_count(schedule, 14.0) + 8
+    assert lunch > st.on_map_count(schedule, 14.75) + 8
 
 
 def test_count_changes_gradually(schedule):

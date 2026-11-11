@@ -180,7 +180,7 @@ def test_next_day_opens_with_yesterdays_closing_stock():
 def test_summary_shows_competitor_and_prices():
     state = opened()
     state["stats"]["shops"]["rival"]["served"] = 7
-    state["stats"]["rival_revenue"] = 840
+    state["stats"]["shops"]["rival"]["revenue"] = 840  # v7: per shop
     s = finish_day(state)["summary"]
     comp = s["competitor"]
     assert comp["name"] == CONFIG["shops"]["rival"]["name"]

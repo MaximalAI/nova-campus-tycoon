@@ -14,6 +14,7 @@ import copy
 import math
 import random
 
+import mechanics
 import students as st
 from config import CONFIG
 
@@ -21,6 +22,8 @@ T = CONFIG["time"]
 ITEMS = CONFIG["wholesale_items"]
 PRODUCTS = CONFIG["products"]
 SHOPS = CONFIG["shops"]
+# v7: the order in which the shops can be bought (1 = your café)
+SHOP_ORDER = sorted(SHOPS, key=lambda s: SHOPS[s]["order"])
 
 # Day states, used for the guidance ("next objective")
 MORNING_PLANNING = "MORNING_PLANNING"
@@ -78,6 +81,9 @@ def new_game(seed: int | None = None) -> dict:
             "opens_day": 1,
             "prices_set": spec["start_owner"] == "bot",  # shown on the price board ("-" until set)
             "stock": [],
+            "sold": False,  # bought today, becomes yours tomorrow morning
+            "front": {},  # v7: portions in machines, on shelves or in a display (product -> batches)
+            "mech": {},  # v7: state of the shop's mechanic
         }
         for s, spec in SHOPS.items()
     }
@@ -152,8 +158,11 @@ def _start_day(state: dict, day: int) -> dict:
         "restock": None,
         "manager_proposals": {},
     })
-    if state["shops"]["rival"].get("sold") and state["shops"]["rival"]["owner"] == "bot":
-        _take_over_rival(state)
+    for shop in SHOP_ORDER:
+        if state["shops"][shop].get("sold") and state["shops"][shop]["owner"] == "bot":
+            _take_over(state, shop)
+    for shop in SHOP_ORDER:
+        mechanics.of(shop).start_day(state)
     for shop in owned_shops(state):
         data = state["shops"][shop]
         if data["manager_hired"]:
@@ -167,7 +176,7 @@ def _start_day(state: dict, day: int) -> dict:
     ws = work_shop(state)
     if ws:
         # keep yesterday's plan for this shop's products, otherwise the default suggestion
-        defaults = CONFIG["start_plan"] if ws == "cafe" else {}
+        defaults = CONFIG["start_plan"] if SHOPS[ws]["start_owner"] == "player" else {}
         state["plan"] = {p: state["plan"].get(p, defaults.get(p, CONFIG["manager"]["min_portions"]))
                          for p in SHOPS[ws]["products"]}
     return state
@@ -188,10 +197,31 @@ def migrate(state: dict) -> dict:
         shop.setdefault("prices_set", True)
         if shop_id == "rival" and shop["owner"] == "player" and shop.get("staff"):
             shop["staff"] = False  # v3/v4 barista: in v5 you run the bought café yourself
+    # v7: new shops start as bots; every shop gets the new fields
+    for shop_id, spec in SHOPS.items():
+        if shop_id not in state["shops"]:
+            state["shops"][shop_id] = {
+                "owner": spec["start_owner"], "prices": dict(spec["start_prices"]), "upgrades": [],
+                "manager": False, "manager_hired": False, "staff": True, "opens_day": 1,
+                "prices_set": True, "stock": [],
+            }
+        shop = state["shops"][shop_id]
+        shop.setdefault("sold", False)
+        shop.setdefault("front", {})
+        shop.setdefault("mech", {})
+    if state.get("status") == VICTORY and not all(
+            d["owner"] == "player" and d["manager_hired"] for d in state["shops"].values()):
+        # a v6 save that had already won: new shops on campus, the race goes on
+        state["status"] = RUNNING
+        state.pop("open_mode", None)
+    for student in state.get("students", {}).values():
+        st.complete_student(state["seed"], state["day"], student)
     stats = state.get("stats")
     if stats is not None:  # v3 and older: new statistics fields
         stats.setdefault("wasted", 0)
         stats.setdefault("flow", {})
+        for shop_id in SHOPS:
+            stats["shops"].setdefault(shop_id, _empty_stats()["shops"][shop_id])
         for shop_stats in stats["shops"].values():
             for key in ("sold_out", "rejected", "tips"):
                 shop_stats.setdefault(key, 0)
@@ -275,13 +305,13 @@ def _manager_buys(state: dict, shop: str, plan: dict | None = None, prices: dict
 
 
 def owned_shops(state: dict) -> list[str]:
-    return [s for s in SHOPS if state["shops"][s]["owner"] == "player"]
+    return [s for s in SHOP_ORDER if state["shops"][s]["owner"] == "player"]
 
 
 def is_auto(state: dict, shop: str) -> bool:
-    """The bot competitor and shops with a working manager serve automatically."""
+    """Bots, shops with a working manager and shops without staff (vending) serve automatically."""
     data = state["shops"][shop]
-    return data["owner"] == "bot" or data["manager"]
+    return data["owner"] == "bot" or data["manager"] or not mechanics.of(shop).staffed
 
 
 def work_shop(state: dict) -> str | None:
@@ -310,41 +340,84 @@ def shop_factor(state: dict, shop: str) -> float:
     )
     if data["owner"] == "player":
         factor *= state["rep_factor"]
+    factor *= mechanics.of(shop).demand_factor(state)
     return round(factor, 4)
+
+
+def shop_open_now(state: dict, shop: str) -> bool:
+    """Takes customers right now: operating today, the day is open and within opening hours."""
+    return shop_operating(state, shop) and mechanics.of(shop).open_now(state)
+
+
+def price_now(state: dict, shop: str, product: str) -> int:
+    """What a customer pays right now (a happy hour can lower the price board's price)."""
+    return mechanics.of(shop).price(state, product, state["shops"][shop]["prices"][product])
 
 
 def offer_prices(state: dict) -> dict[str, int]:
     return {
-        st.offering_key(s, p): state["shops"][s]["prices"][p]
+        st.offering_key(s, p): price_now(state, s, p)
         for s in SHOPS for p in SHOPS[s]["products"]
     }
 
 
+def item_shops(item: str) -> list[str]:
+    """The shops whose products need this wholesale item."""
+    return [s for s in SHOP_ORDER if item in _shop_items(s)]
+
+
 def item_available(state: dict, item: str) -> bool:
-    return not ITEMS[item]["needs_rival"] or state["shops"]["rival"]["owner"] == "player"
+    """v7: the wholesaler sells an item once you own a shop that needs it."""
+    return any(state["shops"][s]["owner"] == "player" for s in item_shops(item))
 
 
 def stock_units(state: dict, shop: str, item: str) -> int:
     return sum(b["units"] for b in state["shops"][shop]["stock"] if b["item"] == item)
 
 
+def front_units(state: dict, shop: str, product: str) -> int:
+    return sum(b["units"] for b in state["shops"][shop].get("front", {}).get(product, []))
+
+
 def can_make(state: dict, shop: str, product: str) -> bool:
     if state["shops"][shop]["owner"] == "bot":
         return True
-    return all(stock_units(state, shop, i) >= q for i, q in PRODUCTS[product]["uses"].items())
+    return bool(portions(state, shop, product))
 
 
 def portions(state: dict, shop: str, product: str) -> int | None:
-    """How many more portions the stock allows (None: the bot competitor, unlimited)."""
+    """How many more portions can be sold (None: a bot shop, unlimited).
+
+    Products of a front (machine, shelf, display) only sell what is in the front."""
     if state["shops"][shop]["owner"] == "bot":
         return None
+    mech = mechanics.of(shop)
+    if not mech.available(state, product):
+        return 0
+    if product in mech.front_products():
+        return front_units(state, shop, product)
     return min(stock_units(state, shop, i) // q for i, q in PRODUCTS[product]["uses"].items())
 
 
 def _consume(state: dict, shop: str, product: str) -> None:
-    """Use ingredients for one portion, oldest batch first."""
+    """Use one portion: from the front if the product is sold there, else the ingredients."""
+    mech = mechanics.of(shop)
+    if product in mech.front_products():
+        batches = state["shops"][shop]["front"].get(product, [])
+        for batch in sorted(batches, key=lambda b: -b.get("age", 0)):
+            if batch["units"] > 0:
+                batch["units"] -= 1
+                break
+        state["shops"][shop]["front"][product] = [b for b in batches if b["units"] > 0]
+    else:
+        _use_ingredients(state, shop, PRODUCTS[product]["uses"])
+    mech.on_consumed(state, product)
+
+
+def _use_ingredients(state: dict, shop: str, uses: dict[str, int]) -> None:
+    """Take ingredients from the storage, oldest batch first."""
     stock = state["shops"][shop]["stock"]
-    for item, qty in PRODUCTS[product]["uses"].items():
+    for item, qty in uses.items():
         _flow(state, shop, item)["used"] += qty
         for batch in sorted((b for b in stock if b["item"] == item), key=lambda b: -b["age"]):
             take = min(qty, batch["units"])
@@ -357,6 +430,47 @@ def _consume(state: dict, shop: str, product: str) -> None:
 
 def _shop_items(shop: str) -> set[str]:
     return {i for p in SHOPS[shop]["products"] for i in PRODUCTS[p]["uses"]}
+
+
+def front_room(state: dict, shop: str, product: str) -> int:
+    """How many more portions of a product fit into the front right now."""
+    mech = mechanics.of(shop)
+    room = 10**9
+    cap = mech.front_capacity(product)
+    if cap is not None:
+        room = cap - front_units(state, shop, product)
+    total = mech.front_total_capacity()
+    if total is not None:
+        used = sum(front_units(state, shop, p) for p in mech.front_products())
+        room = min(room, total - used)
+    return max(0, room)
+
+
+def fill_front(state: dict, shop: str, amounts: dict[str, int] | None) -> dict[str, int]:
+    """Make portions from the storage and put them into the front (machine, shelf, display).
+
+    ``amounts``: wanted portions per product; None fills every product as far as it goes
+    (a manager does this). Returns the portions actually moved."""
+    mech = mechanics.of(shop)
+    moved: dict[str, int] = {}
+    wanted = amounts if amounts is not None else {p: 10**9 for p in SHOPS[shop]["products"]
+                                                   if p in mech.front_products()}
+    if amounts is None and mech.front_total_capacity() is not None:
+        # share the shelf space fairly between the products
+        share = mech.front_total_capacity() // max(1, len(wanted))
+        wanted = {p: max(0, share - front_units(state, shop, p)) for p in wanted}
+    for product, n in wanted.items():
+        uses = PRODUCTS[product]["uses"]
+        can = min(stock_units(state, shop, i) // q for i, q in uses.items())
+        n = min(n, can, front_room(state, shop, product))
+        if n <= 0:
+            continue
+        _use_ingredients(state, shop, {i: q * n for i, q in uses.items()})
+        batch = {"units": n, "age": 0}
+        batch.update(mech.new_front_batch(state, product))
+        state["shops"][shop]["front"].setdefault(product, []).append(batch)
+        moved[product] = n
+    return moved
 
 
 def _require_running(state: dict) -> None:
@@ -381,6 +495,13 @@ def _pay(state: dict, amount: int) -> None:
     if amount > state["money"]:
         raise GameError(f"Not enough money: you need {euro(amount)} but have {euro(state['money'])}.")
     state["money"] -= amount
+
+
+def monopoly_progress(state: dict) -> dict:
+    """For the HUD bar: shops that are yours with a hired manager, out of all shops."""
+    done = [s for s in SHOP_ORDER if state["shops"][s]["owner"] == "player" and state["shops"][s]["manager_hired"]]
+    owned = owned_shops(state)
+    return {"done": len(done), "owned": len(owned), "total": len(SHOPS)}
 
 
 def _check_victory(state: dict) -> None:
@@ -606,12 +727,27 @@ def _end_day(state) -> dict:
             else:
                 kept.append(batch)
         state["shops"][shop]["stock"] = kept
+        # v7: portions in a front spoil with their shortest-lived ingredient
+        for product, batches in state["shops"][shop].get("front", {}).items():
+            uses = PRODUCTS[product]["uses"]
+            shelves = [ITEMS[i]["shelf_days"] for i in uses if ITEMS[i]["shelf_days"] is not None]
+            shelf = min(shelves) if shelves else None
+            keep = []
+            for batch in batches:
+                batch["age"] = batch.get("age", 0) + 1
+                if shelf is not None and batch["age"] >= shelf:
+                    spoiled_value += round(batch["units"] * unit_cost(product))
+                    spoiled[product] = spoiled.get(product, 0) + batch["units"]
+                else:
+                    keep.append(batch)
+            state["shops"][shop]["front"][product] = keep
+        spoiled_value += mechanics.of(shop).end_day(state)
 
     stats = state["stats"]
     revenue = sum(stats["shops"][s]["revenue"] for s in owned_shops(state))
     tips = sum(stats["shops"][s].get("tips", 0) for s in owned_shops(state))
     profit = revenue + tips - stats["purchase_cost"] - stats["spending"]
-    total_market = revenue + stats["rival_revenue"]
+    total_market = revenue + _bot_revenue(state)
     sold: dict[str, int] = {}
     for s in owned_shops(state):
         for p, n in stats["shops"][s]["sold"].items():
@@ -671,19 +807,26 @@ def _stock_report(state: dict) -> dict:
     return report
 
 
+def _bot_revenue(state: dict) -> int:
+    """What the shops you do not own sold today."""
+    return sum(state["stats"]["shops"][s]["revenue"] for s in SHOPS if state["shops"][s]["owner"] == "bot")
+
+
 def _competitor_report(state: dict) -> dict | None:
-    """How the competitor did today (None once you own it)."""
-    if state["shops"]["rival"]["owner"] == "player":
+    """How your next acquisition target did today (None once you own everything)."""
+    shop = next_target(state)
+    if shop is None:
         return None
-    s = state["stats"]["shops"]["rival"]
+    s = state["stats"]["shops"][shop]
     return {
-        "name": SHOPS["rival"]["name"],
+        "shop": shop,
+        "name": SHOPS[shop]["name"],
         "served": s["served"],
         "lost": s["lost"],
-        "revenue": state["stats"]["rival_revenue"],
+        "revenue": s["revenue"],
         "sold": dict(s["sold"]),
-        "prices": dict(state["shops"]["rival"]["prices"]),
-        "factor": shop_factor(state, "rival"),
+        "prices": dict(state["shops"][shop]["prices"]),
+        "factor": shop_factor(state, shop),
     }
 
 
@@ -701,6 +844,13 @@ def _ev_tick(state, ev):
         result.update(_open(state))
         for shop in owned_shops(state):
             state["shops"][shop]["prices_set"] = True  # the prices of the day are fixed now
+    for shop in SHOP_ORDER:
+        mech = mechanics.of(shop)
+        toasts = mech.tick(state)
+        mech.manager_fill(state)
+        if toasts:
+            result["toasts"] = result.get("toasts", []) + toasts
+            result.setdefault("toast", toasts[-1])
     if t >= T["last_customer"] and not state["last_call"]:
         state["last_call"] = True
         result["toast"] = "Last customers"
@@ -756,34 +906,95 @@ def _ev_hire_manager(state, ev):
     _require_owned(state, shop)
     if state["shops"][shop]["manager_hired"]:
         raise GameError("A manager already works here.")
-    _pay(state, CONFIG["manager_cost"])
+    cost = manager_cost(shop)
+    _pay(state, cost)
     state["shops"][shop]["manager_hired"] = True  # v5: starts tomorrow morning
-    state["stats"]["spending"] += CONFIG["manager_cost"]
+    state["stats"]["spending"] += cost
     _check_victory(state)
     return {"toast": "Manager hired - he starts tomorrow morning"}
 
 
-def _ev_buy_competitor(state, ev):
-    rival = state["shops"]["rival"]
-    if rival["owner"] == "player":
-        raise GameError("You already own this café.")
-    if not state["shops"]["cafe"]["manager_hired"]:
-        raise GameError("Hire a manager in your café first.")
-    if rival.get("sold"):
-        raise GameError("You already bought it - it becomes yours tomorrow morning.")
-    _pay(state, CONFIG["acquisition_cost"])
+def manager_cost(shop: str) -> int:
+    return SHOPS[shop].get("manager_cost") or CONFIG["manager_cost"]
+
+
+def acquisition_cost(shop: str) -> int:
+    return SHOPS[shop].get("acquisition_cost") or CONFIG["acquisition_cost"]
+
+
+def zone_open(state: dict, zone: str) -> bool:
+    """A zone opens once every shop of the zone named in "unlock_after" is yours."""
+    after = CONFIG["zones"][zone]["unlock_after"]
+    if after is None:
+        return True
+    return all(state["shops"][s]["owner"] == "player" for s in SHOPS if SHOPS[s]["zone"] == after)
+
+
+def next_target(state: dict) -> str | None:
+    """The next shop in the buying order that is not yours yet (None: you own everything)."""
+    for shop in SHOP_ORDER:
+        if state["shops"][shop]["owner"] != "player":
+            return shop
+    return None
+
+
+def buy_blocker(state: dict, shop: str | None = None) -> str | None:
+    """Why you cannot buy this shop now (None: you can, if you have the money)."""
+    shop = shop or next_target(state)
+    if shop is None:
+        return "You own every shop."
+    data = state["shops"][shop]
+    if data["owner"] == "player":
+        return "You already own this shop."
+    if data.get("sold"):
+        return "You already bought it - it becomes yours tomorrow morning."
+    if shop != next_target(state):
+        return f"Buy {SHOPS[next_target(state)]['name']} first."
+    if not zone_open(state, SHOPS[shop]["zone"]):
+        return f"{CONFIG['zones'][SHOPS[shop]['zone']]['name']} opens once you own every shop before it."
+    missing = [s for s in owned_shops(state) if not state["shops"][s]["manager_hired"]]
+    if missing:
+        names = ", ".join(SHOPS[s]["name"] for s in missing)
+        return f"Hire a manager in every shop you own first ({names})."
+    return None
+
+
+def _ev_buy_shop(state, ev):
+    """Buy the next shop. It is yours tomorrow morning; you run it until you hire its manager."""
+    shop = ev.get("shop") or next_target(state)
+    if shop not in SHOPS:
+        raise GameError(f"Unknown shop: {shop}.")
+    blocker = buy_blocker(state, shop)
+    if blocker:
+        raise GameError(blocker)
+    cost = acquisition_cost(shop)
+    _pay(state, cost)
     # v6: the contract is signed today, the shop becomes yours tomorrow morning. Until then
-    # the old owner keeps running it. Then the barista leaves and you run it yourself
+    # the old owner keeps running it. Then the staff leaves and you run it yourself
     # until you hire a manager there too.
-    rival["sold"] = True
-    state["stats"]["spending"] += CONFIG["acquisition_cost"]
-    return {"toast": f"Contract signed! {SHOPS['rival']['name']} becomes yours tomorrow morning - you will work there yourself."}
+    state["shops"][shop]["sold"] = True
+    state["stats"]["spending"] += cost
+    return {"toast": f"Contract signed! {SHOPS[shop]['name']} becomes yours tomorrow morning - you will work there yourself.",
+            "bought": shop}
 
 
-def _take_over_rival(state: dict) -> None:
-    state["shops"]["rival"].update({"owner": "player", "stock": [], "staff": False, "manager": False,
-                                    "manager_hired": False, "opens_day": state["day"], "prices_set": False,
-                                    "sold": False})
+def _ev_buy_competitor(state, ev):
+    """v2 to v6 event name: buy the next shop (Café da Esquina first)."""
+    return _ev_buy_shop(state, {"shop": ev.get("shop") or next_target(state)})
+
+
+def _take_over(state: dict, shop: str) -> list[str]:
+    """The morning after the purchase: the shop is yours, empty, without staff.
+
+    Returns the zones that opened with this purchase."""
+    before = {z for z in CONFIG["zones"] if zone_open(state, z)}
+    state["shops"][shop].update({"owner": "player", "stock": [], "staff": False, "manager": False,
+                                 "manager_hired": False, "opens_day": state["day"], "prices_set": False,
+                                 "sold": False, "front": {}, "mech": {}})
+    opened = [z for z in CONFIG["zones"] if zone_open(state, z) and z not in before]
+    if opened:
+        state.setdefault("zones_opened", []).extend(opened)
+    return opened
 
 
 # Students and sales -----------------------------------------------------------
@@ -792,7 +1003,8 @@ def _take_over_rival(state: dict) -> None:
 def _decide(state, sid: str, exclude: set[str] = frozenset(), sold_out: set[str] = frozenset()) -> dict:
     """Re-decide where to buy (or not) with the utility model."""
     student = state["students"][sid]
-    shops = [s for s in SHOPS if s not in exclude and shop_operating(state, s)]
+    zone = student.get("zone", "campus")
+    shops = [s for s in SHOP_ORDER if s not in exclude and SHOPS[s]["zone"] == zone and shop_open_now(state, s)]
     if state["closed"] or state["time"] >= T["last_customer"]:
         shops = []
     choice = st.choose_order(
@@ -848,8 +1060,8 @@ def _ev_join_queue(state, ev):
     intent = student.get("intent")
     if not intent or intent["shop"] != ev.get("shop"):
         raise GameError("This student did not want to go to this shop.")
-    if state["closed"]:
-        return _decide(state, student["id"])
+    if state["closed"] or not shop_open_now(state, ev["shop"]):
+        return _decide(state, student["id"], exclude={ev["shop"]})
     st.transition(student, "join_queue")
     return {}
 
@@ -955,8 +1167,7 @@ def _ev_prepare(state, ev):
 
 def _sell(state, shop: str, student: dict, products: list[str], tip: bool = True) -> int:
     """Book a sale: money (for player shops), tip, statistics, student's budget."""
-    prices = state["shops"][shop]["prices"]
-    amount = sum(prices[p] for p in products)
+    amount = sum(price_now(state, shop, p) for p in products)
     stats = state["stats"]["shops"][shop]
     state["last_tip"] = 0
     if state["shops"][shop]["owner"] == "player":
@@ -968,7 +1179,8 @@ def _sell(state, shop: str, student: dict, products: list[str], tip: bool = True
             stats["tips"] = stats.get("tips", 0) + extra
             state["last_tip"] = extra
     else:
-        state["stats"]["rival_revenue"] += amount
+        state["stats"]["rival_revenue"] += amount  # all shops you do not own (name kept from v2)
+        stats["revenue"] += amount
     for p in products:
         stats["sold"][p] = stats["sold"].get(p, 0) + 1
     stats["served"] += 1
@@ -1164,6 +1376,7 @@ HANDLERS = {
     "buy_upgrade": _ev_buy_upgrade,
     "hire_manager": _ev_hire_manager,
     "buy_competitor": _ev_buy_competitor,
+    "buy_shop": _ev_buy_shop,
     "student_arrive": _ev_student_arrive,
     "student_leave": _ev_student_leave,
     "decide": _ev_decide,
@@ -1229,20 +1442,24 @@ def objective(state: dict) -> str:
     ds = state["day_state"]
     ws = work_shop(state)
     if ws is None and ds not in (CLOSING, DAY_SUMMARY):
-        rival = state["shops"]["rival"]
-        if rival.get("sold"):
-            return f"Your manager runs the café. Tomorrow you start in {SHOPS['rival']['name']}."
-        if rival["owner"] == "bot":
-            return "Your manager runs the café. Save up and buy the competitor (upgrade board)."
-        if not rival["manager_hired"]:
-            return f"Your manager runs the café - you run {SHOPS['rival']['name']}."
-        return "Your managers run both cafés."
+        owned = owned_shops(state)
+        runs = "Your manager runs the café" if len(owned) == 1 else f"Your managers run your {len(owned)} shops"
+        pending = [s for s in SHOP_ORDER if state["shops"][s].get("sold") and state["shops"][s]["owner"] == "bot"]
+        if pending:
+            return f"{runs}. Tomorrow you start in {SHOPS[pending[0]]['name']}."
+        mine_without = [s for s in owned if not state["shops"][s]["manager_hired"]]
+        if mine_without:
+            return f"{runs} - you run {SHOPS[mine_without[0]]['name']}."
+        target = next_target(state)
+        if target:
+            return f"{runs}. Save up and buy the next shop: {SHOPS[target]['name']} ({euro(acquisition_cost(target))})."
+        return "Your managers run every shop on the map."
     if ds == CLOSING and state["shops"]["cafe"]["manager_hired"]:
         done = sum(state["cleaning"].values())
         return f"Your manager cleans the café ({done}/{len(state['cleaning'])})."
-    if ws == "rival" and ds in (MORNING_PLANNING, WALK_TO_CAFE, SET_PRICES, SHOP_OPEN):
+    if ws and SHOPS[ws]["start_owner"] != "player" and ds in (MORNING_PLANNING, WALK_TO_CAFE, SET_PRICES, SHOP_OPEN):
         text = OBJECTIVES[WALK_TO_CAFE if ds == WALK_TO_WHOLESALE and state["bag"] else ds]
-        return text.replace("in your café", f"for {SHOPS['rival']['name']}").replace("your café", SHOPS["rival"]["name"])
+        return text.replace("in your café", f"for {SHOPS[ws]['name']}").replace("your café", SHOPS[ws]["name"])
     if ds == CLOSING:
         done = sum(state["cleaning"].values())
         return f"Clean up the café ({done}/{len(state['cleaning'])})."
@@ -1272,6 +1489,13 @@ def view(state: dict) -> dict:
             "stock": stock,
             "portions": {p: portions(state, s, p) for p in SHOPS[s]["products"]},
             "can_make": {p: can_make(state, s, p) for p in SHOPS[s]["products"]},
+            # v7
+            "sold": bool(d.get("sold")),
+            "open_now": shop_open_now(state, s),
+            "price_now": {p: price_now(state, s, p) for p in SHOPS[s]["products"]},
+            "front": {p: front_units(state, s, p) for p in mechanics.of(s).front_products()},
+            "front_room": {p: front_room(state, s, p) for p in mechanics.of(s).front_products()},
+            "mech": mechanics.of(s).view(state),
         }
     return {
         "day": state["day"],
@@ -1306,13 +1530,20 @@ def view(state: dict) -> dict:
         "restock": state.get("restock"),
         "yesterday": state["history"][-1] if state["history"] else None,
         "total_profit": state["total_profit"],
-        "can_buy_competitor": (state["shops"]["rival"]["owner"] == "bot" and not state["shops"]["rival"].get("sold")
-                               and state["shops"]["cafe"]["manager_hired"]),
+        # v7: the monopoly race
+        "next_target": next_target(state),
+        "buy_blocker": buy_blocker(state),
+        "for_sale": next_target(state) if buy_blocker(state) is None else None,
+        "zones_open": [z for z in CONFIG["zones"] if zone_open(state, z)],
+        "items_available": [i for i in ITEMS if item_available(state, i)],
+        "monopoly": monopoly_progress(state),
+        # v5/v6 names, kept for the first acquisition
+        "can_buy_competitor": next_target(state) == "rival" and buy_blocker(state) is None,
         "rival_sold": bool(state["shops"]["rival"].get("sold")),
         "open_mode": bool(state.get("open_mode")),
         "students": {
             sid: {"name": s["name"], "status": s["status"], "intent": s["intent"],
-                  "traits": s["traits"], "look": s["look"]}
+                  "traits": s["traits"], "look": s["look"], "zone": s.get("zone", "campus")}
             for sid, s in state["students"].items()
         },
     }
@@ -1325,7 +1556,7 @@ def _today(state: dict) -> dict:
     revenue = sum(stats["shops"][s]["revenue"] for s in shops)
     tips = sum(stats["shops"][s].get("tips", 0) for s in shops)
     gain = revenue + tips - stats["purchase_cost"] - stats["spending"]
-    market = revenue + (stats["rival_revenue"] if state["shops"]["rival"]["owner"] == "bot" else 0)
+    market = revenue + _bot_revenue(state)
     return {
         "revenue": revenue, "tips": tips, "purchase_cost": stats["purchase_cost"], "spending": stats["spending"],
         "gain": gain,
@@ -1334,6 +1565,7 @@ def _today(state: dict) -> dict:
         "sold": {p: sum(stats["shops"][s]["sold"].get(p, 0) for s in shops)
                  for p in {p for s in shops for p in stats["shops"][s]["sold"]}},
         "rival_revenue": stats["rival_revenue"], "rival_served": stats["shops"]["rival"]["served"],
+        "bot_served": sum(stats["shops"][s]["served"] for s in SHOPS if state["shops"][s]["owner"] == "bot"),
         "market_share": round(revenue / market, 4) if market else 0.0,
     }
 

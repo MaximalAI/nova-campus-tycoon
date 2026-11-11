@@ -53,6 +53,25 @@ def all_offerings() -> list[tuple[str, str]]:
     return [(s, p) for s, spec in CONFIG["shops"].items() for p in spec["products"]]
 
 
+# The first two cafés of v2 to v6. Their utilities keep the old random stream, so a seed
+# plays the same in the old cafés; every newer offering gets its own stream (v7).
+CLASSIC_SHOPS = ("cafe", "rival")
+
+
+def _utility(rng: random.Random, product: str) -> float:
+    lo, hi = CONFIG["products"][product].get("utility", (S["utility_min"], S["utility_max"]))
+    return rng.uniform(lo, hi)
+
+
+def complete_student(seed: int, day: int, student: dict) -> None:
+    """Add what newer versions know about a student: zone and utilities for new offerings."""
+    student.setdefault("zone", "campus")
+    for shop, product in all_offerings():
+        key = offering_key(shop, product)
+        if key not in student["utilities"]:
+            student["utilities"][key] = _utility(_rng(seed, day, "utility", student["id"], key), product)
+
+
 # ---------------------------------------------------------------------------
 # Daily pool and schedule
 # ---------------------------------------------------------------------------
@@ -70,7 +89,7 @@ def make_pool(seed: int, day: int) -> dict[str, dict]:
         sid = f"s{i}"
         utilities = {
             offering_key(s, p): rng.uniform(S["utility_min"], S["utility_max"])
-            for s, p in all_offerings()
+            for s, p in all_offerings() if s in CLASSIC_SHOPS
         }
         pool[sid] = {
             "id": sid,
@@ -87,7 +106,9 @@ def make_pool(seed: int, day: int) -> dict[str, dict]:
             "status": OFF_MAP,
             "intent": None,
             "purchases": [],
+            "zone": "campus",
         }
+        complete_student(seed, day, pool[sid])
     return pool
 
 
@@ -170,20 +191,24 @@ def best_bundle(utilities: dict[str, float], prices: dict[str, int], factors: di
 
 def choose_order(student: dict, prices: dict[str, int], factors: dict[str, float],
                  shops: list[str], sold_out: set[str] = frozenset()) -> tuple[str, list[str]] | None:
-    """Pick the café and the items for one visit, or None if nothing is worth buying."""
-    available = [
-        offering_key(s, p) for s in shops for p in CONFIG["shops"][s]["products"]
-        if offering_key(s, p) not in sold_out
-    ]
-    bundle = best_bundle(student["utilities"], prices, factors, student["budget"], available)
-    if not bundle:
+    """Pick the shop and the items for one visit, or None if nothing is worth buying.
+
+    v7: a visit goes to one shop, so the best bundle is computed per shop (at most three
+    products each, so 8 bundles instead of 2^27) and the shop with the highest utility wins.
+    Ties go to the shop listed first (the buying order)."""
+    best: tuple[float, str, list[str]] | None = None
+    for shop in shops:
+        available = [offering_key(shop, p) for p in CONFIG["shops"][shop]["products"]
+                     if offering_key(shop, p) not in sold_out]
+        bundle = best_bundle(student["utilities"], prices, factors, student["budget"], available)
+        if not bundle:
+            continue
+        value = sum(factors[shop] * student["utilities"][k] - prices[k] for k in bundle)
+        if best is None or value > best[0] + 1e-9:
+            best = (value, shop, [k.split(":")[1] for k in bundle])
+    if best is None:
         return None
-    surplus: dict[str, float] = {}
-    for k in bundle:
-        shop = k.split(":")[0]
-        surplus[shop] = surplus.get(shop, 0.0) + factors[shop] * student["utilities"][k] - prices[k]
-    shop = max(sorted(surplus), key=lambda s: surplus[s])
-    return shop, [k.split(":")[1] for k in bundle if k.startswith(shop + ":")]
+    return best[1], best[2]
 
 
 def wants_to_visit(seed: int, day: int, student: dict, t: float) -> bool:

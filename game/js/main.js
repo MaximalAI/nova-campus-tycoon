@@ -59,6 +59,12 @@ class Game {
       cafe: new StaffAgent(this, "cafe", { shirt: 0x2a9d8f, pants: 0x22223b, hair: 0xd4a017, skin: 0xffdbac }, { apron: true, cap: 0x264653 }),
       rival: new StaffAgent(this, "rival", { shirt: 0xb83a3a, pants: 0x22223b, hair: 0x5a3825, skin: 0xf1c27d }, { apron: true }),
     };
+    // v7: staff for every new shop with a counter (vending machines have none)
+    const hairs = [0x111111, 0x8d5524, 0xe8c07d, 0x5a3825, 0xa0522d, 0x2b1d0e, 0xd4a017];
+    this.world.newShops.forEach((key, i) => {
+      if (P[key].vending) return;
+      this.workers[key] = new StaffAgent(this, key, { shirt: BUILDINGS[key].trim, pants: 0x22223b, hair: hairs[i % hairs.length], skin: [0xf1c27d, 0xe0ac69, 0xc68642, 0xffdbac][i % 4] }, { apron: true });
+    });
     this.raycaster = new THREE.Raycaster();
     this.minimap = this.root.querySelector("#minimap-canvas").getContext("2d");
     this.bindInput();
@@ -94,18 +100,26 @@ class Game {
     const box = this.root.querySelector("#bigmap");
     box.classList.remove("hidden");
     this.releasePointer();
-    this.drawMap(this.root.querySelector("#bigmap-canvas").getContext("2d"), 560, 50, false);
+    const R = this.bigMapR();
+    this.drawMap(this.root.querySelector("#bigmap-canvas").getContext("2d"), 560, R, false);
     const spots = this.root.querySelector("#bigmap-spots");
-    const R = 50, pct = (c) => `${((c + R) / (2 * R)) * 100}%`;
+    const pct = (c) => `${((c + R) / (2 * R)) * 100}%`;
     const v = this.view;
-    const places = [
-      { key: "cafe", label: "☕ Your café", color: "#2e8b57", at: { x: -34, z: 9 } },
-      { key: "rival", label: v.shops.rival.owner === "player" ? "🏪 Café da Esquina (yours)" : v.rival_sold ? "🏪 Café da Esquina (yours tomorrow)" : "🏪 Competitor", color: v.shops.rival.owner === "player" ? "#2e8b57" : "#c0392b", at: { x: 0, z: -31 } },
-      { key: "wholesale", label: "🏬 Wholesaler", color: "#2c6fbb", at: { x: 37, z: 12.5 } },
-    ];
+    const places = [{ key: "wholesale", label: "🏬 Wholesaler", color: "#2c6fbb", at: { x: 40, z: 12.5 } }];
+    for (const [key, spec] of Object.entries(this.config.shops)) {
+      const s = v.shops[key], b = BUILDINGS[key];
+      if (!b || !this.world.zoneVisible(b.zone)) continue;
+      const mine = s.owner === "player";
+      const name = key === "cafe" ? "Your café" : spec.name;
+      const tag = mine && key !== "cafe" ? " (yours)" : s.sold ? " (yours tomorrow)" : v.for_sale === key ? " (for sale)" : "";
+      // labels below the building, or above it for the shops north of the main path
+      const at = { x: (b.x0 + b.x1) / 2, z: b.z1 < -10 ? b.z0 - 2.8 : b.z1 + 2.8 };
+      places.push({ key, label: `${spec.icon || "🏪"} ${name}${tag}`, color: mine ? "#2e8b57" : "#c0392b", at });
+    }
     const block = this.teleportBlock();
     spots.innerHTML = places.map((p) => `<div class="map-spot ${block ? "off" : ""}" data-go="${p.key}" style="left:${pct(p.at.x)};top:${pct(p.at.z)};background:${p.color}" title="${block || "Go there"}">${p.label}</div>`).join("");
   }
+  bigMapR() { return 58; }
   closeBigMap() { this.root.querySelector("#bigmap").classList.add("hidden"); }
   teleportBlock() {
     if (this.ui.dialogOpen) return "Close the pop-up first";
@@ -115,13 +129,21 @@ class Game {
   teleportTo(key) {
     const block = this.teleportBlock();
     if (block) { this.ui.toast(block, true); return; }
-    const at = { cafe: P.cafe.spawn, rival: P.rival.spawn, wholesale: { x: 23.6, z: 0 } }[key];
     if (this.world.buildingAt(this.player.pos) === "wholesale") this.flow.leftWholesaleByMap();
-    this.player.teleport(at, key === "rival" ? Math.PI : key === "wholesale" ? Math.PI / 2 : -Math.PI / 2);
-    this.camYaw = key === "rival" ? 0 : key === "wholesale" ? -Math.PI / 2 : Math.PI / 2;
+    if (key === "wholesale") {
+      this.player.teleport({ x: 23.6, z: 0 }, Math.PI / 2);
+      this.camYaw = -Math.PI / 2;
+    } else this.spawnAt(key);
     this.flow.zoneFlags = {};
     this.closeBigMap();
     this.fadeQuick();
+  }
+  // In front of a shop, looking at its door (the café: looking at the campus, as since v2)
+  spawnAt(shop) {
+    const sp = P[shop].spawn, door = P[shop].doorOut;
+    const facing = shop === "cafe" ? Math.PI / 2 : Math.atan2(door.x - sp.x, door.z - sp.z);
+    this.player.teleport(sp, facing);
+    this.camYaw = facing - Math.PI;
   }
   fadeQuick() {
     const f = this.root.querySelector("#fade");
@@ -185,9 +207,7 @@ class Game {
     this.ui.showHud(true);
     if (this.ui.current && this.ui.current.id === "P00") this.ui.closeDialog();
     // v5: the day starts in front of the shop you run yourself
-    const home = view.work_shop === "rival" ? "rival" : "cafe";
-    this.player.teleport(P[home].spawn, home === "rival" ? Math.PI : Math.PI / 2);
-    this.camYaw = home === "rival" ? 0 : -Math.PI / 2;
+    this.spawnAt(view.work_shop || "cafe");
     for (const w of Object.values(this.workers)) w.reset();
     this.root.querySelector("#fade").classList.remove("on");
     if (continuing) { this.flow.wholesaleAllowed = false; this.bridge.send("resume", {}, () => {}); }
@@ -467,8 +487,11 @@ class Game {
     }
     this.currentHint = it && !this.ui.dialogOpen ? it : null;
     w.updateShelves(v);
-    // Roof colour shows the owner: green = yours, red = competitor
-    w.buildingParts.rival.roof.material.color.setHex(v.shops.rival.owner === "player" ? 0x2e8b57 : BUILDINGS.rival.roof);
+    // Roof colour shows the owner: green = yours, otherwise the shop's own colour
+    for (const key of Object.keys(this.config.shops)) {
+      if (key === "cafe" || !w.buildingParts[key]) continue;
+      w.buildingParts[key].roof.material.color.setHex(v.shops[key].owner === "player" ? 0x2e8b57 : BUILDINGS[key].roof);
+    }
     w.floorSpot.visible = v.day_state === "CLOSING" && !v.cleaning.floor;
     w.updatePriceBoards(v);
     this.staff.cashier.animate(0);
@@ -582,15 +605,15 @@ class Game {
     path(-80, 80, -2.2, 2.2); path(-2.2, 2.2, -16, 80);
     ctx.beginPath(); ctx.arc(mx(0), my(6), 8 / (2 * R) * S, 0, Math.PI * 2); ctx.fill();
     const v = this.view;
-    const colors = { cafe: "#2e8b57", rival: v.shops.rival.owner === "player" ? "#2e8b57" : "#c0392b", wholesale: "#2c6fbb" };
-    const icons = { cafe: "☕", rival: "🏪", wholesale: "🏬" };
     for (const [key, b] of Object.entries(BUILDINGS)) {
-      ctx.fillStyle = colors[key];
+      if (!this.world.zoneVisible(b.zone)) continue;
+      const shop = this.config.shops[key];
+      ctx.fillStyle = key === "wholesale" ? "#2c6fbb" : v.shops[key].owner === "player" ? "#2e8b57" : v.for_sale === key ? "#e67e22" : "#c0392b";
       ctx.fillRect(mx(b.x0), my(b.z0), mx(b.x1) - mx(b.x0), my(b.z1) - my(b.z0));
       ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5 * k;
       ctx.strokeRect(mx(b.x0), my(b.z0), mx(b.x1) - mx(b.x0), my(b.z1) - my(b.z0));
       ctx.font = `${small ? 16 : 30}px serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(icons[key], mx((b.x0 + b.x1) / 2), my((b.z0 + b.z1) / 2));
+      ctx.fillText(key === "wholesale" ? "🏬" : shop.icon || "🏪", mx((b.x0 + b.x1) / 2), my((b.z0 + b.z1) / 2));
     }
     ctx.fillStyle = "#3d3d3d";
     for (const a of this.flow.agents.values()) {

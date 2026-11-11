@@ -55,30 +55,45 @@ def test_manager_and_acquisition(rich):
     assert state["shops"]["rival"]["owner"] == "player" and not state["shops"]["rival"]["sold"]
 
 
-def test_victory_when_both_shops_have_a_manager(rich):
+def own_everything_but_the_last_manager(state):
+    """Buy every shop in order (v7: nine... or however many the config has)."""
+    state["money"] = 10_000_000
+    for shop in logic.SHOP_ORDER:
+        if state["shops"][shop]["owner"] != "player":
+            state, _ = go(state, type="buy_shop", shop=shop)
+            state = next_day(state)
+        if shop != logic.SHOP_ORDER[-1] and not state["shops"][shop]["manager_hired"]:
+            state, _ = go(state, type="hire_manager", shop=shop)
+    return state
+
+
+def test_victory_when_every_shop_has_a_manager(rich):
     state, _ = go(rich, type="hire_manager", shop="cafe")
     state, _ = go(state, type="buy_competitor")
     with pytest.raises(GameError, match="own"):
         go(state, type="hire_manager", shop="rival")  # not yours before tomorrow
     state = next_day(state)
     state, _ = go(state, type="hire_manager", shop="rival")
+    assert state["status"] == logic.RUNNING  # v7: two cafés are not the whole campus
+    state = own_everything_but_the_last_manager(state)
+    assert state["status"] == logic.RUNNING
+    state, _ = go(state, type="hire_manager", shop=logic.SHOP_ORDER[-1])
     assert state["status"] == logic.VICTORY
     with pytest.raises(GameError):
         go(state, type="enter_wholesaler")
 
 
 def test_keep_playing_in_open_mode_after_the_victory(rich):
-    state, _ = go(rich, type="hire_manager", shop="cafe")
-    state, _ = go(state, type="buy_competitor")
-    state = next_day(state)
+    state = own_everything_but_the_last_manager(rich)
     with pytest.raises(GameError, match="after you have won"):
         go(state, type="continue_open_mode")
-    state, _ = go(state, type="hire_manager", shop="rival")
+    state, _ = go(state, type="hire_manager", shop=logic.SHOP_ORDER[-1])
     state, res = go(state, type="continue_open_mode")
     assert state["status"] == logic.RUNNING and state["open_mode"]
     assert logic.view(state)["open_mode"]
+    day = state["day"]
     state = next_day(state)  # the game simply goes on
-    assert state["status"] == logic.RUNNING and state["day"] == 3
+    assert state["status"] == logic.RUNNING and state["day"] == day + 1
 
 
 def queued(state, sid, shop, items):
