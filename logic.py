@@ -1162,6 +1162,8 @@ def _ev_prepare(state, ev):
         raise GameError("Accept an order first.")
     if product not in SHOPS[shop]["products"]:
         raise GameError("This is not sold in this shop.")
+    if mechanics.of(shop).service != "stations":
+        raise GameError("Nothing is prepared at a station here.")
     if not can_make(state, shop, product):
         raise GameError(f"{PRODUCTS[product]['name']} is sold out.")
     _consume(state, shop, product)
@@ -1402,6 +1404,28 @@ def _ev_repair(state, ev):
     return {"toast": f"Machine repaired for {euro(cost)}"}
 
 
+def _ev_assemble(state, ev):
+    """Put a bowl together from the chosen ingredients (P29). A wrong set makes a wrong bowl."""
+    shop = ev.get("shop")
+    mech = mechanics.of(shop)
+    if mech.service != "assembly":
+        raise GameError("Nothing is assembled here.")
+    _require_manual(state, shop, ev)
+    if not state["current_order"] or state["current_order"]["shop"] != shop:
+        raise GameError("Accept an order first.")
+    chosen = ev.get("ingredients") or []
+    if not chosen or len(set(chosen)) != len(chosen) or not set(chosen) <= set(mech.p["ingredients"]):
+        raise GameError("Pick the ingredients for the bowl.")
+    missing = [ITEMS[i]["name"] for i in chosen if stock_units(state, shop, i) < 1]
+    if missing:
+        raise GameError(f"Out of {', '.join(missing)}.")
+    _use_ingredients(state, shop, {i: 1 for i in chosen})
+    product = mech.result(set(chosen))
+    state["tray"].append(product)
+    return {"toast": f"{PRODUCTS[product]['name']} ready" if product in SHOPS[shop]["products"] else "Wrong bowl",
+            "product": product, "tray": list(state["tray"])}
+
+
 def _ev_checkout(state, ev):
     """Scan the shopping of the customer at the register (P09 in a self-service shop)."""
     shop = ev.get("shop")
@@ -1450,18 +1474,22 @@ HANDLERS = {
     "fill_front": _ev_fill_front,
     "repair": _ev_repair,
     "checkout": _ev_checkout,
+    "assemble": _ev_assemble,
 }
 
 
 
-def apply(state: dict, event: dict) -> tuple[dict, dict]:
-    """Apply one event. Returns (new_state, result). Raises GameError if not allowed."""
+def apply(state: dict, event: dict, inplace: bool = False) -> tuple[dict, dict]:
+    """Apply one event. Returns (new_state, result). Raises GameError if not allowed.
+
+    ``inplace=True`` skips the safety copy (only for the headless balance simulation,
+    which plays thousands of days)."""
     kind = event.get("type")
     if kind not in HANDLERS:
         raise GameError(f"Unknown event: {kind}.")
     if state["status"] != RUNNING and not (kind == "continue_open_mode" and state["status"] == VICTORY):
         raise GameError("The game is over.")
-    new = copy.deepcopy(state)
+    new = state if inplace else copy.deepcopy(state)
     if "t" in event:
         t = float(event["t"])
         if t < new["time"] - 1e-6 and kind != "next_day":

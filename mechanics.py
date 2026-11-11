@@ -197,10 +197,67 @@ class Shelves(Mechanic):
                 "scan_minutes": self.p["scan_minutes"]}
 
 
+class Assembly(Mechanic):
+    """Bowl Bar: the first products with two ingredients (brief 14.3).
+
+    At the one assembly station the player picks the ingredients. The set decides what
+    lands on the tray: exactly the ingredients of a product make that product, any other
+    set is a "wrong bowl" (it still uses the ingredients). Handing over a wrong bowl is a
+    wrong order. Staff (bot or manager) always assemble correctly."""
+
+    service = "assembly"
+
+    def result(self, ingredients: set[str]) -> str:
+        for product in CONFIG["shops"][self.shop]["products"]:
+            if set(CONFIG["products"][product]["uses"]) == ingredients:
+                return product
+        return self.p["wrong"]
+
+    def view(self, state: dict) -> dict:
+        return {"ingredients": list(self.p["ingredients"]), "wrong": self.p["wrong"]}
+
+
+class LunchRush(Mechanic):
+    """Nova Mensa: only open around lunch; during the rush (12:00 to 14:00) the Mensa is
+    the place to be (higher demand factor) and the campus is full (phase table)."""
+
+    def in_rush(self, state: dict) -> bool:
+        a, b = self.p["rush"]
+        return a - 1e-6 <= state["time"] < b - 1e-6
+
+    def demand_factor(self, state: dict) -> float:
+        return self.p["rush_factor"] if self.in_rush(state) else 1.0
+
+    def tick(self, state: dict) -> list[str]:
+        d = self.data(state)
+        if self.in_rush(state) and d.get("rush_day") != state["day"]:
+            d["rush_day"] = state["day"]
+            if self.owned(state):
+                return [self.p["toast"]]
+        return []
+
+    def objective(self, state: dict, day_state: str) -> str | None:
+        hours = CONFIG["shops"][self.shop]["open_hours"]
+        if day_state in ("SET_PRICES", "SHOP_OPEN") and state["time"] < hours[0]:
+            return f"{CONFIG['shops'][self.shop]['name']} opens at {_hhmm(hours[0])} - get ready for the lunch rush."
+        if day_state == "SHOP_OPEN" and state["time"] >= hours[1]:
+            return f"{CONFIG['shops'][self.shop]['name']} is closed for today. Plan tomorrow's lunch."
+        return super().objective(state, day_state)
+
+    def view(self, state: dict) -> dict:
+        return {"rush": list(self.p["rush"]), "in_rush": self.in_rush(state)}
+
+
+def _hhmm(t: float) -> str:
+    return f"{int(t):02d}:{round((t - int(t)) * 60):02d}"
+
+
 MECHANICS: dict[str, type[Mechanic]] = {
     "counter": Counter,
     "vending": Vending,
     "shelves": Shelves,
+    "assembly": Assembly,
+    "lunch_rush": LunchRush,
 }
 
 _cache: dict[str, Mechanic] = {}

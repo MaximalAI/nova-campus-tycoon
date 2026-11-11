@@ -240,3 +240,7 @@
   box-shadow: 0 2px 8px rgba(0,0,0,.18); margin-bottom: 3px; }
 #dialog .chip { white-space: nowrap; }
 #dialog .line .chip.ok { font-size: 12px; padding: 4px 9px; flex-shrink: 0; }
+/* v7: ingredient toggles (P29) */
+button.chip.toggle { cursor: pointer; font: inherit; font-weight: 800; }
+button.chip.toggle.ok { background: #e3f6ea; }
+button.chip.toggle:disabled { opacity: .45; cursor: default; }

@@ -1060,7 +1060,8 @@ class Flow {
         this.send("tick", { t: Math.max(t, mark) }, (r) => {
           if (!r.ok) return;
           const res = r.result;
-          if (res.toast) this.game.ui.toast(res.toast);
+          if (res.toasts) for (const t of res.toasts) this.game.ui.toast(t, t.includes("broken"));
+          else if (res.toast) this.game.ui.toast(res.toast);
           if (res.manager_bought && this.game.ui.current?.id === "P23") this.game.ui.closeDialog();
           if (res.opened) this.onOpened();
           if (res.closed) { this.game.setSpeed(1); this.onClosed(); }
@@ -1407,10 +1408,12 @@ class Flow {
   // v7: station labels and use in the generated shops (several products can share a station)
   stationProducts(shop, kind) { return this.cfg.shops[shop].products.filter((p) => this.cfg.products[p].station === kind); }
   stationLabel(shop, kind) {
+    if (this.v && this.v.shops[shop].service === "assembly") return "Assemble a bowl";
     const ps = this.stationProducts(shop, kind);
     return ps.length === 1 ? `Prepare: ${this.cfg.products[ps[0]].name}` : `${kind[0].toUpperCase()}${kind.slice(1)} station`;
   }
   useStation(shop, kind) {
+    if (this.v.shops[shop].service === "assembly") return this.openAssembly(shop);
     const ps = this.stationProducts(shop, kind);
     if (ps.length === 1) return this.openStation(shop, ps[0]);
     const order = this.v.current_order;
@@ -1427,6 +1430,65 @@ class Flow {
       primary: { label: "Close" },
     });
   }
+  // ------------------------------------------------------ v7 Bowl Bar: P29 assemble a bowl
+  openAssembly(shop) {
+    const v = this.v, ui = this.game.ui, m = v.shops[shop].mech;
+    const order = v.current_order;
+    if (!order || order.shop !== shop) return ui.toast("Take an order at the counter first.");
+    const chosen = new Set();
+    const result = () => {
+      const p = this.cfg.shops[shop].products.find((q) => {
+        const uses = Object.keys(this.cfg.products[q].uses);
+        return uses.length === chosen.size && uses.every((i) => chosen.has(i));
+      });
+      return p || m.wrong;
+    };
+    const wanted = order.items.filter((p) => !v.tray.includes(p)).map((p) => `${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}`).join(", ");
+    let bar = null;
+    const dlg = {
+      id: "P29", icon: "🥣", title: "Assemble a bowl",
+      text: `Pick the ingredients, then assemble. The ingredients decide what you get - a wrong mix is a wrong bowl.` +
+        (wanted ? `<div class="note">Still needed: ${wanted}</div>` : ""),
+      body: (body) => {
+        const draw = () => {
+          body.innerHTML = "";
+          const chips = el("div", "chips");
+          for (const i of m.ingredients) {
+            const it = this.cfg.wholesale_items[i], have = v.shops[shop].stock[i] ? v.shops[shop].stock[i].units : 0;
+            const b = el("button", "chip toggle" + (chosen.has(i) ? " ok" : ""), `${it.icon} ${esc(it.name)} <span class="sub">${have}</span>`);
+            b.disabled = have < 1 || dlg.busy;
+            b.onclick = () => { if (chosen.has(i)) chosen.delete(i); else chosen.add(i); draw(); };
+            chips.appendChild(b);
+          }
+          body.appendChild(chips);
+          const r = result(), spec = this.cfg.products[r];
+          body.appendChild(el("div", "note", chosen.size ? `Result: <b>${spec.icon} ${esc(spec.name)}</b>` : "Result: -"));
+          const pb = el("div", "progress"); bar = el("div"); pb.appendChild(bar); body.appendChild(pb);
+        };
+        dlg.redraw = draw;
+        draw();
+      },
+      cancelWhileBusy: true,
+      secondary: { label: "Cancel", action: () => { if (dlg.busy) { this.progress = null; dlg.busy = false; ui.toast("Cancelled - nothing used"); } } },
+      primary: { label: "Assemble", disabled: () => !chosen.size, action: () => {
+        dlg.busy = true;
+        ui.primaryButton.disabled = true;
+        const r = result();
+        const minutes = Math.max(1, this.cfg.products[r].prep_minutes || 2);
+        this.progress = { minutes, done: 0, bar: () => bar, onDone: () => {
+          this.send("assemble", { shop, ingredients: [...chosen], player_inside: this.playerIn(shop) }, (res) => {
+            if (!res.ok) return ui.toast(res.error, true);
+            ui.toast(res.result.toast, res.result.toast === "Wrong bowl");
+          });
+          dlg.busy = false; ui.closeDialog();
+        } };
+        return "keep";
+      } },
+      onClose: () => { if (this.progress && dlg.busy) this.progress = null; },
+    };
+    ui.showDialog(dlg);
+  }
+
   // ------------------------------------------------ v7 SnackBots: P25 refill, P26 broken, P27 office
   machineLabel(shop, product) {
     const v = this.v;

@@ -47,7 +47,7 @@ def test_manager_and_acquisition(rich):
         go(state, type="hire_manager", shop="cafe")
     state, _ = go(state, type="buy_competitor")  # possible as soon as the manager is hired
     assert state["shops"]["rival"]["sold"] and state["shops"]["rival"]["owner"] == "bot"  # v6: yours tomorrow
-    assert state["money"] == 200_000 - CONFIG["manager_cost"] - CONFIG["acquisition_cost"]
+    assert state["money"] == 200_000 - logic.manager_cost("cafe") - logic.acquisition_cost("rival")  # v7: per shop
     assert state["status"] == logic.RUNNING
     with pytest.raises(GameError, match="tomorrow"):
         go(state, type="buy_competitor")
