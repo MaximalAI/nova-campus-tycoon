@@ -97,7 +97,9 @@ CONFIG = {
         "fast_bonus": 1,
         "wrong_order": -4,
         "customer_lost": -3,  # waited too long and left
-        "sold_out_left": -1,  # found the shelves empty and left (once per student and day)
+        "sold_out_left": -1,  # found the shelves empty and went home (v8: every time)
+        "sold_out_to_competitor": -2,  # v8: found the shelves empty and went to a competitor
+        "sold_out_daily_cap": 15,  # v8: sold-out losses cost at most this much reputation per day
         "order_cancelled": -3,  # you cancelled an accepted order
         "rejected": -1,  # you turned the customer away
         "cleaning_missed": -5,
@@ -421,26 +423,33 @@ CONFIG = {
             "name": "Café da Esquina", "products": ["coffee", "tea", "croissant"],
             "base_factor": 1.2, "start_owner": "bot", "order": 2, "zone": "campus",
             "start_prices": {"coffee": 100, "tea": 120, "croissant": 150},
-            "acquisition_cost": 70_000, "manager_cost": 12_000, "max_queue": 4, "open_hours": None,
+            "acquisition_cost": 30_000, "manager_cost": 12_000, "max_queue": 4, "open_hours": None,
             "mechanic": {"type": "counter"}, "icon": "🏪",
         },
         "snackbots": {
             "name": "SnackBots", "products": ["water", "coke_zero", "protein_bar"],
             "base_factor": 1.0, "start_owner": "bot", "order": 3, "zone": "campus",
             "start_prices": {"water": 100, "coke_zero": 150, "protein_bar": 200},
-            "acquisition_cost": 75_000, "manager_cost": 12_000, "max_queue": 3, "open_hours": None,
-            "mechanic": {"type": "vending", "capacity": 24, "breakdown_per_hour": 0.04, "repair_cost": 1_500,
-                         "objectives": {"SET_PRICES": "Refill the machines and set your prices at the office.",
-                                        "SHOP_OPEN": "Keep the machines filled and repair breakdowns."}},
+            "acquisition_cost": 60_000, "manager_cost": 12_000, "max_queue": 3, "open_hours": None,
+            # v8: the machines stand on the campus near the office; each sells all three products.
+            # x/z: position, rot: rotation (the front faces the path).
+            "mechanic": {"type": "vending", "capacity": 12, "breakdown_per_hour": 0.04, "repair_cost": 1_500,
+                         "machines": [
+                             {"id": "m1", "name": "Plaza South", "x": 4.0, "z": 27.5, "rot": -1.5708},
+                             {"id": "m2", "name": "Main Path", "x": 13.0, "z": 3.8, "rot": 3.1416},
+                             {"id": "m3", "name": "Mercado Corner", "x": 21.0, "z": -3.8, "rot": 0.0},
+                         ],
+                         "objectives": {"SET_PRICES": "Refill the machines on campus and set your prices at the office.",
+                                        "SHOP_OPEN": "Refill the machines, collect the cash and bring it to the office."}},
             "icon": "🤖",
             "building": {"x0": 7, "x1": 15, "z0": 13, "z1": 21, "door": "west", "wall": 0xe3f2fd,
-                         "trim": 0x1565c0, "roof": 0x1e88e5, "sign": "SNACKBOTS", "interior": "vending"},
+                         "trim": 0x1565c0, "roof": 0x1e88e5, "sign": "SNACKBOTS", "interior": "office"},
         },
         "mercado": {
             "name": "Mercado & Go", "products": ["sandwich", "iced_tea", "apple"],
             "base_factor": 1.0, "start_owner": "bot", "order": 4, "zone": "campus",
             "start_prices": {"sandwich": 300, "iced_tea": 150, "apple": 80},
-            "acquisition_cost": 140_000, "manager_cost": 20_000, "max_queue": 4, "open_hours": None,
+            "acquisition_cost": 120_000, "manager_cost": 20_000, "max_queue": 4, "open_hours": None,
             "mechanic": {"type": "shelves", "capacity": 60, "fill_until": 10.0, "scan_minutes": 1,
                          "objectives": {"SET_PRICES": "Fill the shelves and set your prices at the register.",
                                         "SHOP_OPEN": "Scan your customers' shopping at the register."}},
@@ -452,7 +461,7 @@ CONFIG = {
             "name": "Bowl Bar", "products": ["poke_bowl", "acai_bowl", "smoothie"],
             "base_factor": 1.1, "start_owner": "bot", "order": 5, "zone": "campus",
             "start_prices": {"poke_bowl": 750, "acai_bowl": 550, "smoothie": 350},
-            "acquisition_cost": 200_000, "manager_cost": 25_000, "max_queue": 4, "open_hours": None,
+            "acquisition_cost": 170_000, "manager_cost": 25_000, "max_queue": 4, "open_hours": None,
             "mechanic": {"type": "assembly", "ingredients": ["rice", "salmon", "acai", "fruit_mix"], "wrong": "wrong_bowl",
                          "objectives": {"SHOP_OPEN": "Put the bowls together at the assembly station - check the ingredients!"}},
             "icon": "🥗",
@@ -463,9 +472,9 @@ CONFIG = {
             "name": "Nova Mensa", "products": ["chicken_fries", "pizza", "pudding"],
             "base_factor": 1.0, "start_owner": "bot", "order": 6, "zone": "campus",
             "start_prices": {"chicken_fries": 450, "pizza": 250, "pudding": 120},
-            "acquisition_cost": 260_000, "manager_cost": 30_000, "max_queue": 8, "open_hours": [11.5, 14.5],
+            "acquisition_cost": 220_000, "manager_cost": 30_000, "max_queue": 8, "open_hours": [11.5, 14.5],
             "mechanic": {"type": "lunch_rush", "rush": [12.0, 14.0], "rush_factor": 1.4, "toast": "Lunch rush at the Mensa!"},
-            "icon": "🍽️",
+            "icon": "🍛",  # v8: the plate emoji drew a white circle on the maps
             "building": {"x0": -26, "x1": -10, "z0": -34, "z1": -20, "door": "south", "wall": 0xeceff1,
                          "trim": 0x37474f, "roof": 0x455a64, "sign": "NOVA MENSA", "interior": "counter"},
         },
@@ -473,7 +482,7 @@ CONFIG = {
             "name": "Surf Shack", "products": ["surf_rental", "wetsuit_rental", "surf_class"],
             "base_factor": 1.0, "start_owner": "bot", "order": 7, "zone": "beach",
             "start_prices": {"surf_rental": 1_200, "wetsuit_rental": 600, "surf_class": 2_500},
-            "acquisition_cost": 340_000, "manager_cost": 35_000, "max_queue": 4, "open_hours": None,
+            "acquisition_cost": 300_000, "manager_cost": 35_000, "max_queue": 4, "open_hours": None,
             "mechanic": {"type": "rental", "rentals": {"surf_rental": {"hours": 2.0},
                                                        "wetsuit_rental": {"hours": 2.0, "dry_hours": 1.0}},
                          "turns_per_day": 4, "weather": "waves"},
@@ -485,7 +494,7 @@ CONFIG = {
             "name": "Praia Bar", "products": ["beer", "sangria", "burger"],
             "base_factor": 1.1, "start_owner": "bot", "order": 8, "zone": "beach",
             "start_prices": {"beer": 250, "sangria": 400, "burger": 700},
-            "acquisition_cost": 420_000, "manager_cost": 40_000, "max_queue": 6, "open_hours": [SUNSET, 20.0],
+            "acquisition_cost": 360_000, "manager_cost": 40_000, "max_queue": 6, "open_hours": [SUNSET, 20.0],
             "mechanic": {"type": "sunset_bar", "happy_hours": 1.0, "discount": 0.3, "max_discount": 0.5,
                          "happy_factor": 1.4, "toast": "Happy hour at Praia Bar!"},
             "icon": "🍹",
@@ -496,7 +505,7 @@ CONFIG = {
             "name": "Gelado Kiosk", "products": ["ice_scoop", "ice_lolly", "iced_coffee"],
             "base_factor": 1.0, "start_owner": "bot", "order": 9, "zone": "beach",
             "start_prices": {"ice_scoop": 200, "ice_lolly": 150, "iced_coffee": 300},
-            "acquisition_cost": 500_000, "manager_cost": 40_000, "max_queue": 5, "open_hours": None,
+            "acquisition_cost": 430_000, "manager_cost": 40_000, "max_queue": 5, "open_hours": None,
             "mechanic": {"type": "melting", "front": ["ice_scoop", "ice_lolly"], "capacity": 30, "melt_hours": 3.0,
                          "weather": "temperature"},
             "icon": "🍦",
@@ -505,7 +514,9 @@ CONFIG = {
         },
     },
     # Headless balance run (simulation.py --campaign): the target days for each purchase.
-    "balance_target": {"first_purchase_day": 10, "days_per_further_shop": 5},
+    # v8: cheaper shops (team decision: the second shop costs €300) - first purchase around
+    # day 6, then about 4 days per shop.
+    "balance_target": {"first_purchase_day": 6, "days_per_further_shop": 4},
     "price_step": 10,
     "max_price": 1_000,
     "upgrades": {
@@ -524,5 +535,28 @@ CONFIG = {
         "coffee_machine": {"name": "Clean the coffee machine", "minutes": 3},
         "tables": {"name": "Clear the tables", "minutes": 3},
         "floor": {"name": "Sweep the floor", "minutes": 3},
+    },
+    # v8: two easter eggs (see specs/v8-fixes-and-easter-eggs.md)
+    "easter_eggs": {
+        # Jep turns up somewhere on the campus every morning (seeded spot).
+        "jep": {
+            "name": "Jep",
+            "price": 1_000,
+            "high_minutes": 10,  # game minutes
+            "spots": [[8.0, 9.5], [-14.0, 8.5], [14.0, -8.5], [-8.0, -9.0], [30.0, 22.0], [-17.0, -13.0], [-45.0, 25.0], [40.0, -25.0]],
+        },
+        # A broken vending machine hides a ladder down to an underground casino.
+        "casino": {
+            "entry": {"x": -23.0, "z": 16.0, "rot": -1.5708},  # behind the bowl bar, facing west
+            "chips": [1_000, 5_000, 10_000, 50_000],
+            "max_bet": 100_000,
+            # roulette: one number 0-36 per spin; 0 makes every bet lose
+            "bets": {
+                "red": {"name": "Red", "pays": 1}, "black": {"name": "Black", "pays": 1},
+                "even": {"name": "Even", "pays": 1}, "odd": {"name": "Odd", "pays": 1},
+                "dozen1": {"name": "1-12", "pays": 2}, "dozen2": {"name": "13-24", "pays": 2},
+                "dozen3": {"name": "25-36", "pays": 2},
+            },
+        },
     },
 }

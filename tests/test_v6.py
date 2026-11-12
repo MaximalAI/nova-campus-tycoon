@@ -66,9 +66,12 @@ def test_victory_dialog_can_be_followed_by_open_mode():
     assert logic.objective(state) == "Your managers run every shop on the map."
 
 
-def test_a_newly_hired_manager_already_cleans_tonight():
+def test_a_newly_hired_manager_starts_tomorrow_so_you_clean_tonight():
+    """v8 (team decision): a manager hired during the day only starts the next morning."""
     state = logic.new_game(seed=6)
     state["money"] = 100_000
     state, _ = go(state, 9.0, type="hire_manager", shop="cafe")
     state, _ = go(state, 20.0, type="tick")
+    assert "manager cleans" not in logic.objective(state)
+    state["shops"]["cafe"]["manager"] = True  # from his first working day on
     assert "manager cleans" in logic.objective(state)

@@ -34,7 +34,7 @@ function shopFrame(b) {
 // Gameplay points of a new shop, computed from its building and queue size.
 function genericPoints(b, spec) {
   const f = shopFrame(b), D = f.depth, W = f.width;
-  const vending = b.interior === "vending";
+  const vending = b.interior === "vending" || b.interior === "office";
   const cd = vending ? D - 1.2 : b.interior === "market" ? D - 3.5 : D - 5.5; // counter line
   const maxq = spec.max_queue || 4;
   const first = vending ? D - 1.6 : cd - 1.1;
@@ -362,15 +362,22 @@ class World {
       void body;
       const glass = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.3, 0.05), new THREE.MeshLambertMaterial({ color: 0xbde0fe, transparent: true, opacity: 0.55 }));
       glass.position.set(-0.12, 1.25, 0.42); g.add(glass); meshes.push(glass);
-      const icon = this.emojiTexture(this.game.config.products[opts.product].icon, 128);
-      const pic = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.55), new THREE.MeshBasicMaterial({ map: icon, transparent: true }));
-      pic.position.set(-0.12, 1.3, 0.46); g.add(pic);
+      // product pictures behind the glass (v8: a machine on the campus sells all products)
+      const shown = opts.product ? [opts.product] : this.game.config.shops[shop].products;
+      shown.forEach((p, i) => {
+        const pic = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.34),
+          new THREE.MeshBasicMaterial({ map: this.emojiTexture(this.game.config.products[p].icon, 128), transparent: true }));
+        const n = shown.length;
+        pic.position.set(-0.12, n === 1 ? 1.3 : 1.72 - i * 0.42, 0.46);
+        if (n === 1) pic.scale.setScalar(1.6);
+        g.add(pic);
+      });
       add(new THREE.BoxGeometry(0.25, 0.5, 0.05), 0x263238, 0.45, 1.25, 0.42);
       const lightMat = new THREE.MeshBasicMaterial({ color: 0x2ecc71 });
       const led = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), lightMat);
       led.position.set(0.45, 1.7, 0.45); g.add(led);
       this.machineLights = this.machineLights || {};
-      this.machineLights[`${shop}:${opts.product}`] = lightMat;
+      this.machineLights[`${shop}:${opts.machine || opts.product}`] = lightMat;
       g.position.set(x, 0, z); g.rotation.y = rotY || 0;
       this.scene.add(g);
       return meshes;
@@ -553,7 +560,7 @@ class World {
       this.addInteractable({ id: "clean_" + spot, pos, meshes: [mesh], cleaning: spot, priority: 2,
         label: () => g.config.cleaning_spots[spot].name,
         // v6: with a manager the player cannot clean - the manager does it
-        enabled: () => g.view && g.view.day_state === "CLOSING" && !g.view.cleaning[spot] && !g.view.shops.cafe.manager_hired,
+        enabled: () => g.view && g.view.day_state === "CLOSING" && !g.view.cleaning[spot] && !g.view.shops.cafe.manager,
         action: () => g.flow.openCleaning(spot) });
     }
     this.addInteractable({ id: "counter_front_cafe", pos: { x: -35.6, z: 0.2 }, radius: 1.8, meshes: [], priority: 1,
@@ -641,8 +648,13 @@ class World {
     this.gates.beach = { x0: -2.6, x1: 2.6, z0: fenceZ - 0.2, z1: fenceZ + 0.2, active: true, mesh: gate };
     this.colliders.push(this.gates.beach);
     const signTex = this.textTexture("BEACH: OPENS WHEN THE CAMPUS IS YOURS", "#c0392b", "#ffffff", 1024, 128, 46);
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 0.65), new THREE.MeshBasicMaterial({ map: signTex, side: THREE.DoubleSide }));
-    sign.position.set(0, 1.75, fenceZ - 0.1); s.add(sign);
+    // v8: one sign per side, so the text reads correctly from the campus and from the beach
+    const sign = new THREE.Group();
+    for (const [z, rot] of [[-0.08, Math.PI], [0.08, 0]]) {
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 0.65), new THREE.MeshBasicMaterial({ map: signTex }));
+      face.position.set(0, 0, z); face.rotation.y = rot; sign.add(face);
+    }
+    sign.position.set(0, 1.75, fenceZ); s.add(sign);
     this.gates.beach.sign = sign;
     // forecast board on the promenade (P30)
     const board = this.board("SURF & SUN", 4.5, 79.6, Math.PI, "#00838f");
@@ -682,7 +694,31 @@ class World {
     const items = [...new Set(spec.products.flatMap((p) => Object.keys(g.config.products[p].uses)))];
     const kinds = [...new Set(spec.products.map((p) => g.config.products[p].station).filter(Boolean))];
     const stationAt = {};
-    if (b.interior === "vending") {
+    if (b.interior === "office") {
+      // v8: SnackBots' office: desk (manager, prices, cash deposit), storage and day plan.
+      // The machines themselves stand on the campus (config "machines").
+      const desk = boxAt(1.8, 0.9, 0.9, 0x5d4037, D - 2.0, -(W / 2 - 1.4), 0.45);
+      boxAt(0.5, 0.35, 0.4, 0x263238, D - 2.0, -(W / 2 - 1.4), 1.1);
+      boxAt(0.7, 0.5, 0.5, 0x37474f, D - 1.2, -(W / 2 - 1.4), 0.25); // safe for the cash
+      const r = f.rect(D - 2.5, D - 1.0, -(W / 2), -(W / 2 - 2.4)); this.collide(r.x0, r.x1, r.z0, r.z1);
+      pt.upBoard = at(D - 2.0, -(W / 2 - 3.0));
+      pt.register = pt.upBoard;
+      this.addInteractable({ id: `office_${key}`, pos: pt.upBoard, meshes: [desk], radius: 2.0,
+        label: () => g.flow.officeLabel(key), enabled: () => !!g.view, action: () => g.flow.openOffice(key) });
+      pt.machines = {};
+      for (const m of spec.mechanic.machines) {
+        const meshes = this.station(key, "machine", m.x, m.z, m.rot, { machine: m.id, color: b.trim });
+        const dx = Math.sin(m.rot), dz = Math.cos(m.rot);
+        // collider: 1.3 wide, 0.8 deep, rotated by 90° steps
+        const wide = Math.abs(dx) > 0.5 ? [0.45, 0.7] : [0.7, 0.45];
+        this.collide(m.x - wide[0], m.x + wide[0], m.z - wide[1], m.z + wide[1]);
+        const front = { x: m.x + dx * 1.3, z: m.z + dz * 1.3 };
+        pt.machines[m.id] = { pos: { x: m.x, z: m.z }, front, name: m.name };
+        this.addInteractable({ id: `machine_${key}_${m.id}`, pos: front, meshes, radius: 1.6,
+          label: () => g.flow.machineLabel(key, m.id), enabled: () => g.flow.machineLabel(key, m.id) !== null,
+          action: () => g.flow.useMachine(key, m.id) });
+      }
+    } else if (b.interior === "vending") {
       spec.products.forEach((p, i) => {
         const lat = (i - (spec.products.length - 1) / 2) * 2.2;
         const pos = at(D - 0.55, lat);
@@ -849,9 +885,12 @@ class World {
   // v7: status lights of the vending machines and goods on the market shelves
   updateMechanics(view) {
     for (const [k, mat] of Object.entries(this.machineLights || {})) {
-      const [shop, product] = k.split(":"), s = view.shops[shop];
+      const [shop, id] = k.split(":"), s = view.shops[shop];
       const mine = s.owner === "player";
-      const color = mine && s.mech.broken && s.mech.broken[product] ? 0xe74c3c : mine && !(s.front[product] > 0) ? 0xf1c40f : 0x2ecc71;
+      const m = s.mech.machines && s.mech.machines[id];
+      // red: broken · yellow: empty · blue: cash waiting · green: fine
+      const empty = m ? !Object.values(m.stock).some((n) => n > 0) : !(s.front[id] > 0);
+      const color = mine && m && m.broken ? 0xe74c3c : mine && empty ? 0xf1c40f : mine && m && m.cash > 0 ? 0x3498db : 0x2ecc71;
       if (mat.color.getHex() !== color) mat.color.setHex(color);
     }
     for (const [shop, shelves] of Object.entries(this.marketShelves || {})) {

@@ -86,6 +86,22 @@ class Mechanic:
         """Extra fields of a batch put into the front (a melting time, ...)."""
         return {}
 
+    # v8 hooks for machines that work on their own (vending)
+    def front_count(self, state: dict, product: str) -> int | None:
+        """Portions in the front if the mechanic counts them itself (None: the batches)."""
+        return None
+
+    def take(self, state: dict, product: str) -> bool:
+        """Give out one portion itself (True) or let logic take it from front or storage."""
+        return False
+
+    def cash_in(self, state: dict, amount: int) -> int:
+        """How much of a sale goes into your money right now (the rest waits somewhere)."""
+        return amount
+
+    def serve_at(self, state: dict, machine: str | None) -> None:
+        """Where the next sale happens (a vending machine)."""
+
     def start_day(self, state: dict) -> None:
         pass
 
@@ -119,37 +135,105 @@ def _rng(state: dict, *parts) -> random.Random:
 
 
 class Vending(Mechanic):
-    """SnackBots: machines instead of staff (brief 14.3).
+    """SnackBots: machines spread over the campus instead of staff (brief 14.3, v8).
 
-    No prep time and nobody serves: a student takes the product if the machine has it.
-    The player refills the machines from the storage. During opening hours a machine
-    can break down (chance per game hour); a broken machine sells nothing until it is
-    repaired for a fee. A working manager refills and repairs automatically."""
+    Every machine sells all products and has its own stock, cash box and status.
+    No prep time and nobody serves: a student walks to a machine and takes what it has.
+    The player refills each machine from the office storage, takes the money out of the
+    cash boxes and brings it back to the office. During opening hours a machine can
+    break down (chance per game hour); a broken machine sells nothing until it is
+    repaired for a fee. A working manager does all of this on his own."""
 
     staffed = False
     front_fill = "anytime"
+
+    def machine_ids(self) -> list[str]:
+        return [m["id"] for m in self.p["machines"]]
+
+    def machines(self, state: dict) -> dict:
+        d = self.data(state).setdefault("machines", {})
+        for m in self.machine_ids():
+            d.setdefault(m, {"stock": {}, "cash": 0, "broken": False})
+        return d
 
     def front_products(self) -> set[str]:
         return set(CONFIG["shops"][self.shop]["products"])
 
     def front_capacity(self, product: str) -> int | None:
-        return self.p["capacity"]
+        return self.p["capacity"] * len(self.p["machines"])
+
+    def front_count(self, state: dict, product: str) -> int | None:
+        if not self.owned(state):
+            return 0
+        return sum(m["stock"].get(product, 0) for m in self.machines(state).values() if not m["broken"])
 
     def broken(self, state: dict) -> dict:
-        return self.data(state).setdefault("broken", {})
+        return {mid: m["broken"] for mid, m in self.machines(state).items()}
 
     def available(self, state: dict, product: str) -> bool:
-        return not self.broken(state).get(product)
+        return True  # broken machines simply do not count in front_count
 
-    def repair(self, state: dict, product: str) -> int:
+    def serve_at(self, state: dict, machine: str | None) -> None:
+        self.data(state)["at"] = machine if machine in self.machine_ids() else None
+
+    def take(self, state: dict, product: str) -> bool:
+        ms = self.machines(state)
+        at = self.data(state).get("at")
+        order = ([at] if at else []) + sorted(ms, key=lambda m: -ms[m]["stock"].get(product, 0))
+        for mid in order:
+            m = ms[mid]
+            if not m["broken"] and m["stock"].get(product, 0) > 0:
+                m["stock"][product] -= 1
+                self.data(state)["last_machine"] = mid
+                return True
+        return True  # nothing left; can_make was checked before
+
+    def cash_in(self, state: dict, amount: int) -> int:
+        mid = self.data(state).get("last_machine") or self.data(state).get("at") or self.machine_ids()[0]
+        self.machines(state)[mid]["cash"] += amount
+        return 0
+
+    def refill(self, state: dict, machine: str | None) -> dict[str, int]:
+        """Fill one machine (or all with None) from the storage, up to its capacity per product."""
         import logic
 
-        if not self.broken(state).get(product):
+        moved: dict[str, int] = {}
+        ids = [machine] if machine else self.machine_ids()
+        for mid in ids:
+            if mid not in self.machine_ids():
+                raise logic.GameError("Unknown machine.")
+            m = self.machines(state)[mid]
+            for product in CONFIG["shops"][self.shop]["products"]:
+                uses = CONFIG["products"][product]["uses"]
+                can = min(logic.stock_units(state, self.shop, i) // q for i, q in uses.items())
+                n = min(can, self.p["capacity"] - m["stock"].get(product, 0))
+                if n > 0:
+                    logic._use_ingredients(state, self.shop, {i: q * n for i, q in uses.items()})
+                    m["stock"][product] = m["stock"].get(product, 0) + n
+                    moved[product] = moved.get(product, 0) + n
+        return moved
+
+    def collect(self, state: dict, machine: str | None) -> int:
+        ids = [machine] if machine else self.machine_ids()
+        total = 0
+        for mid in ids:
+            m = self.machines(state)[mid]
+            total += m["cash"]
+            m["cash"] = 0
+        return total
+
+    def repair(self, state: dict, machine: str) -> int:
+        import logic
+
+        if machine not in self.machine_ids():
+            raise logic.GameError("Unknown machine.")
+        m = self.machines(state)[machine]
+        if not m["broken"]:
             raise logic.GameError("This machine works.")
         cost = self.p["repair_cost"]
         logic._pay(state, cost)
         state["stats"]["spending"] += cost
-        self.broken(state)[product] = False
+        m["broken"] = False
         return cost
 
     def start_day(self, state: dict) -> None:
@@ -163,24 +247,37 @@ class Vending(Mechanic):
         last = d.get("last_hour", int(CONFIG["time"]["open"]))
         now = min(int(state["time"] + 1e-6), int(CONFIG["time"]["close"]))
         toasts = []
+        names = {m["id"]: m["name"] for m in self.p["machines"]}
         for hour in range(last, now):
-            for product in CONFIG["shops"][self.shop]["products"]:
-                if self.broken(state).get(product):
-                    continue
-                if _rng(state, self.shop, product, hour).random() < self.p["breakdown_per_hour"]:
-                    self.broken(state)[product] = True
-                    toasts.append(f"Machine broken: {CONFIG['products'][product]['name']}")
+            for mid, m in self.machines(state).items():
+                if not m["broken"] and _rng(state, self.shop, mid, hour).random() < self.p["breakdown_per_hour"]:
+                    m["broken"] = True
+                    toasts.append(f"Machine broken: {names[mid]}")
         d["last_hour"] = max(last, now)
         if state["shops"][self.shop]["manager"]:
-            for product, is_broken in list(self.broken(state).items()):
-                if is_broken and state["money"] >= self.p["repair_cost"]:
-                    self.repair(state, product)
-                    toasts.append(f"Manager repaired the {CONFIG['products'][product]['name']} machine")
+            for mid, m in self.machines(state).items():
+                if m["broken"] and state["money"] >= self.p["repair_cost"]:
+                    self.repair(state, mid)
+                    toasts.append(f"Manager repaired the machine {names[mid]}")
         return toasts
 
+    def manager_fill(self, state: dict) -> None:
+        """A working manager refills every machine and brings the cash to the office."""
+        if not state["shops"][self.shop]["manager"] or state["closed"]:
+            return
+        self.refill(state, None)
+        state["money"] += self.collect(state, None)
+
+    def end_day(self, state: dict) -> int:
+        if state["shops"][self.shop]["manager"]:
+            state["money"] += self.collect(state, None)
+        return 0
+
     def view(self, state: dict) -> dict:
-        return {"broken": dict(self.broken(state)), "repair_cost": self.p["repair_cost"],
-                "capacity": self.p["capacity"]}
+        ms = self.machines(state) if self.owned(state) else {}
+        return {"repair_cost": self.p["repair_cost"], "capacity": self.p["capacity"],
+                "broken": {mid: m["broken"] for mid, m in ms.items()},
+                "machines": {mid: {"stock": dict(m["stock"]), "cash": m["cash"], "broken": m["broken"]} for mid, m in ms.items()}}
 
 
 class Shelves(Mechanic):

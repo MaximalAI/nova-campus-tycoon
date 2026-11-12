@@ -238,6 +238,10 @@ def play_evening(state: dict, reserve: int) -> tuple[dict, list[tuple]]:
         state, _ = logic.apply(state, dict(ev, t=state["time"]))
         done.append((state["day"], ev["type"], ev.get("shop")))
 
+    for shop in logic.owned_shops(state):  # v8: bring the cash of the snack machines to the office
+        if hasattr(mechanics.of(shop), "collect") and not state["shops"][shop]["manager"]:
+            state["carried_cash"] = state.get("carried_cash", 0) + mechanics.of(shop).collect(state, None)
+    state["money"] += state.pop("carried_cash", 0)
     for shop in logic.owned_shops(state):
         if not state["shops"][shop]["manager_hired"] and state["money"] - logic.manager_cost(shop) >= reserve:
             go({"type": "hire_manager", "shop": shop})

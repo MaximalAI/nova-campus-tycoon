@@ -77,6 +77,7 @@ class Bridge {
       this.callbacks.delete(ev.cid);
       if (!r.ok && !cb && r.error) this.game.ui.toast(r.error, true);
       if (cb) { try { cb(r); } catch (e) { console.error(e); } }
+      try { this.game.sound.onEvent(ev, r); } catch (e) { /* sound is optional */ }
     }
     this.flush();
     return true;

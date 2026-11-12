@@ -14,7 +14,8 @@ class UI {
       b.addEventListener("click", () => game.setSpeed(Number(b.dataset.speed))));
     this.$("#pause-btn").addEventListener("click", () => game.flow.openPause());
     this.$("#skip-btn").addEventListener("click", () => game.flow.skipToOpening());
-    this.$("#gain").addEventListener("click", () => game.flow.openStats());
+    // v8: one press opens the statistics (pointerdown fires at once, the HUD text below updates often)
+    this.$("#gain").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); game.flow.openStats(); });
     this.$("#mono").addEventListener("click", () => game.flow.openMonopoly());
     this.$("#minimap").addEventListener("click", () => game.openBigMap());
     this.$("#bigmap-close").addEventListener("click", () => game.closeBigMap());
@@ -50,16 +51,17 @@ class UI {
     money.textContent = euro(v.money);
     money.classList.toggle("neg", v.money <= 0);
     const gain = v.today ? v.today.gain : 0;
-    const gEl = this.$("#gain");
-    gEl.textContent = `today ${gain >= 0 ? "+" : ""}${euro(gain)}`;
+    const gEl = this.$("#gain"), gText = `today ${gain >= 0 ? "+" : ""}${euro(gain)}`;
+    if (this.$("#gain-text").textContent !== gText) this.$("#gain-text").textContent = gText;
     gEl.classList.toggle("neg", gain < 0);
     this.$("#rep-fill").style.width = `${v.reputation}%`;
     this.$("#rep-value").textContent = `${v.reputation} / 100`;
     this.updateRepPerks(v);
     if (v.monopoly) {
       const m = v.monopoly;
-      this.$("#mono-value").textContent = `${m.done}/${m.total}`;
-      this.$("#mono-fill").style.width = `${(m.done / m.total) * 100}%`;
+      // v8: counts the shops you own (your café is shop 1); P35 shows the managers
+      this.$("#mono-value").textContent = `${m.owned}/${m.total}`;
+      this.$("#mono-fill").style.width = `${(m.owned / m.total) * 100}%`;
     }
     this.updateStock(v);
     this.updateShopPanel(v);
@@ -117,6 +119,7 @@ class UI {
     const owned = Object.keys(v.shops).filter((s) => v.shops[s].owner === "player");
     // v7: with many shops, the ones run by a manager are shown in one compact line
     const managed = owned.length > 2 ? owned.filter((s) => v.shops[s].manager) : [];
+    if (v.carried_cash) html += `<div class="stock-shop">💰 Cash to bring to the office: ${euro(v.carried_cash)}</div>`;
     if (managed.length) html += `<div class="stock-shop">🧑‍🍳 Managers run: ${managed.map((s) => cfg.shops[s].icon || "🏪").join(" ")}</div>`;
     for (const s of owned) {
       if (managed.includes(s)) continue;
@@ -236,7 +239,7 @@ class UI {
     const buttons = el("div", "dlg-buttons");
     if (d.secondary) {
       const b = el("button", "btn secondary", esc(d.secondary.label));
-      b.onclick = () => this.pressSecondary();
+      b.onclick = () => { this.game.sound.play("click"); this.pressSecondary(); };
       buttons.appendChild(b);
     }
     for (const extra of d.extra || []) {
@@ -248,7 +251,7 @@ class UI {
     if (d.primary) {
       const b = el("button", "btn primary", esc(d.primary.label));
       b.disabled = typeof d.primary.disabled === "function" ? d.primary.disabled() : !!d.primary.disabled;
-      b.onclick = () => this.pressPrimary();
+      b.onclick = () => { this.game.sound.play("click"); this.pressPrimary(); };
       buttons.appendChild(b);
       this.primaryButton = b;
     }

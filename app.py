@@ -42,7 +42,7 @@ game_component = st.components.v2.component(
     css=(GAME_DIR / "game.css").read_text(encoding="utf-8"),
     # The browser code is split into readable files and joined in this order.
     js="\n".join((GAME_DIR / "js" / f).read_text(encoding="utf-8")
-                 for f in ("core.js", "world.js", "people.js", "ui.js", "flow.js", "main.js")),
+                 for f in ("core.js", "sound.js", "world.js", "people.js", "ui.js", "flow.js", "eggs.js", "main.js")),
 )
 
 ss = st.session_state

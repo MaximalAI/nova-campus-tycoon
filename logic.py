@@ -14,6 +14,7 @@ import copy
 import math
 import random
 
+import easter_eggs
 import mechanics
 import students as st
 from config import CONFIG
@@ -62,6 +63,8 @@ def _empty_stats() -> dict:
         "spending": 0,
         "rival_revenue": 0,
         "wasted": 0,
+        "jep": 0,  # v8: spent at Jep
+        "casino": 0,  # v8: won (+) or lost (-) in the casino
         # Stock movements per shop and item: opening stock, goods in, used, spoiled
         "flow": {},
     }
@@ -158,6 +161,8 @@ def _start_day(state: dict, day: int) -> dict:
         "manager_proposals": {},
         "weather": weather_for(state["seed"], day),
         "zone_news": [],
+        "jep": easter_eggs.jep_spot(state["seed"], day),
+        "high_until": 0,
     })
     for shop in SHOP_ORDER:
         if state["shops"][shop].get("sold") and state["shops"][shop]["owner"] == "bot":
@@ -228,6 +233,8 @@ def migrate(state: dict) -> dict:
         st.complete_student(state["seed"], state["day"], student)
     state.setdefault("weather", weather_for(state["seed"], state["day"]))
     state.setdefault("zone_news", [])
+    state.setdefault("jep", easter_eggs.jep_spot(state["seed"], state["day"]))  # v8
+    state.setdefault("high_until", 0)
     if "students" in state:  # v7: the beach visitors exist (but do not come before the beach opens)
         for sid, student in st.make_pool(state["seed"], state["day"]).items():
             if sid not in state["students"]:
@@ -237,6 +244,8 @@ def migrate(state: dict) -> dict:
     if stats is not None:  # v3 and older: new statistics fields
         stats.setdefault("wasted", 0)
         stats.setdefault("flow", {})
+        stats.setdefault("jep", 0)
+        stats.setdefault("casino", 0)
         for shop_id in SHOPS:
             stats["shops"].setdefault(shop_id, _empty_stats()["shops"][shop_id])
         for shop_stats in stats["shops"].values():
@@ -259,7 +268,8 @@ def _add_stock(state: dict, shop: str, item: str, units: int) -> None:
 def manager_proposal(state: dict, shop: str) -> dict:
     """What the manager of a shop wants to buy and charge today.
 
-    Plan: yesterday's sales in this shop plus a buffer (more if a product sold out),
+    Plan: yesterday's sales plus the customers who found it sold out, plus a buffer
+    (more if a product sold out),
     at least ``min_portions``. Prices: yesterday's prices, +€0.10 for products that
     sold out, -€0.10 for products nobody bought (never below cost + €0.10).
     """
@@ -269,9 +279,11 @@ def manager_proposal(state: dict, shop: str) -> dict:
     plan, prices = {}, dict(state["shops"][shop]["prices"])
     for p in SHOPS[shop]["products"]:
         sold = y["sold"].get(p, 0) if y else 0
-        sold_out = bool(y and y.get("sold_out_products", {}).get(p))
+        missed = y.get("sold_out_products", {}).get(p, 0) if y else 0
+        sold_out = bool(missed)
         buffer = m["sold_out_buffer"] if sold_out else m["buffer"]
-        plan[p] = max(m["min_portions"], math.ceil(sold * buffer))
+        # v8: customers who found it sold out count as demand too (sold-out now costs reputation)
+        plan[p] = max(m["min_portions"], math.ceil((sold + missed) * buffer))
         if y and sold_out:
             prices[p] = min(PRODUCTS[p].get("max_price", CONFIG["max_price"]), prices[p] + CONFIG["price_step"])
         elif y and sold == 0:
@@ -394,6 +406,9 @@ def stock_units(state: dict, shop: str, item: str) -> int:
 
 
 def front_units(state: dict, shop: str, product: str) -> int:
+    counted = mechanics.of(shop).front_count(state, product)  # v8: vending machines count themselves
+    if counted is not None:
+        return counted
     return sum(b["units"] for b in state["shops"][shop].get("front", {}).get(product, []))
 
 
@@ -420,6 +435,9 @@ def portions(state: dict, shop: str, product: str) -> int | None:
 def _consume(state: dict, shop: str, product: str) -> None:
     """Use one portion: from the front if the product is sold there, else the ingredients."""
     mech = mechanics.of(shop)
+    if mech.take(state, product):  # v8: a machine gives out the product itself
+        mech.on_consumed(state, product)
+        return
     if product in mech.front_products():
         batches = state["shops"][shop]["front"].get(product, [])
         for batch in sorted(batches, key=lambda b: -b.get("age", 0)):
@@ -770,7 +788,8 @@ def _end_day(state) -> dict:
     stats = state["stats"]
     revenue = sum(stats["shops"][s]["revenue"] for s in owned_shops(state))
     tips = sum(stats["shops"][s].get("tips", 0) for s in owned_shops(state))
-    profit = revenue + tips - stats["purchase_cost"] - stats["spending"]
+    # v8: Jep and the casino count as well (they move real money)
+    profit = revenue + tips - stats["purchase_cost"] - stats["spending"] - stats.get("jep", 0) + stats.get("casino", 0)
     total_market = revenue + _bot_revenue(state)
     sold: dict[str, int] = {}
     for s in owned_shops(state):
@@ -781,6 +800,8 @@ def _end_day(state) -> dict:
         "revenue": revenue,
         "purchase_cost": stats["purchase_cost"],
         "spending": stats["spending"],
+        "jep": stats.get("jep", 0),
+        "casino": stats.get("casino", 0),
         "spoiled_value": spoiled_value,
         "spoiled": spoiled,
         "profit": profit,
@@ -798,12 +819,14 @@ def _end_day(state) -> dict:
         "prices": {s: dict(state["shops"][s]["prices"]) for s in SHOPS},
         "stock": _stock_report(state),
         "competitor": _competitor_report(state),
-        # per owned shop (managers use this for tomorrow's proposal)
+        "competitors": _competitors_overview(state),
+        # per shop (managers use this for tomorrow's proposal; v8: also the shops you do not
+        # own yet, so the first plan in a bought shop knows how much it used to sell)
         "by_shop": {s: {"sold": dict(stats["shops"][s]["sold"]), "served": stats["shops"][s]["served"],
                         "lost": stats["shops"][s]["lost"], "revenue": stats["shops"][s]["revenue"],
                         "sold_out_products": dict(stats["shops"][s].get("sold_out_products", {})),
                         "manager": state["shops"][s]["manager"]}
-                    for s in owned_shops(state)},
+                    for s in SHOP_ORDER},
     }
     state["summary"] = summary
     state["history"].append(summary)
@@ -834,6 +857,26 @@ def _stock_report(state: dict) -> dict:
 def _bot_revenue(state: dict) -> int:
     """What the shops you do not own sold today."""
     return sum(state["stats"]["shops"][s]["revenue"] for s in SHOPS if state["shops"][s]["owner"] == "bot")
+
+
+def _competitors_overview(state: dict) -> list[dict]:
+    """v8: every shop you do not own yet, for the summary table (in buying order)."""
+    rows = []
+    target = next_target(state)
+    for shop in SHOP_ORDER:
+        data = state["shops"][shop]
+        if data["owner"] == "player":
+            continue
+        s = state["stats"]["shops"][shop]
+        prices = data["prices"]
+        rows.append({
+            "shop": shop, "name": SHOPS[shop]["name"], "icon": SHOPS[shop].get("icon", ""),
+            "zone": SHOPS[shop]["zone"], "zone_open": zone_open(state, SHOPS[shop]["zone"]),
+            "served": s["served"], "revenue": s["revenue"], "sold": dict(s["sold"]),
+            "avg_price": round(sum(prices.values()) / len(prices)), "factor": shop_factor(state, shop),
+            "price": acquisition_cost(shop), "next": shop == target, "sold_to_you": bool(data.get("sold")),
+        })
+    return rows
 
 
 def _competitor_report(state: dict) -> dict | None:
@@ -1120,7 +1163,7 @@ def _ev_at_counter(state, ev):
     if state["shops"][shop]["owner"] == "player":
         state["stats"]["shops"][shop]["lost"] += 1
         state["stats"]["shops"][shop]["sold_out"] = state["stats"]["shops"][shop].get("sold_out", 0) + 1
-        delta = _sold_out_penalty(state, student)
+        delta = _sold_out_penalty(state, student, to_competitor=decision["action"] == "shop")
     reason = (f"prefers {SHOPS[decision['shop']]['name']}" if decision["action"] == "shop"
               else "nothing else here is worth the money")
     return {"items": [], "sold_out": sold_out, "leaves": True, "decision": decision, "rep_delta": delta, "reason": reason}
@@ -1197,9 +1240,10 @@ def _sell(state, shop: str, student: dict, products: list[str], tip: bool = True
     stats = state["stats"]["shops"][shop]
     state["last_tip"] = 0
     if state["shops"][shop]["owner"] == "player":
-        state["money"] += amount
+        # v8: a vending machine keeps the money in its cash box until you collect it
+        state["money"] += mechanics.of(shop).cash_in(state, amount)
         stats["revenue"] += amount
-        if tip:
+        if tip and mechanics.of(shop).staffed:
             extra = round(amount * tip_rate(state["reputation"]))
             state["money"] += extra
             stats["tips"] = stats.get("tips", 0) + extra
@@ -1272,12 +1316,18 @@ def _ev_patience_expired(state, ev):
     return result
 
 
-def _sold_out_penalty(state, student: dict) -> float:
-    """A student who finds your shelves empty is disappointed once per day (not on every visit)."""
-    if student.get("disappointed"):
-        return 0
+def _sold_out_penalty(state, student: dict, to_competitor: bool = False) -> float:
+    """A student who finds your shelves empty and leaves costs reputation, every time (v8).
+
+    Going to a competitor instead costs more than simply going home."""
     student["disappointed"] = True
-    return _change_reputation(state, CONFIG["reputation"]["sold_out_left"])
+    key = "sold_out_to_competitor" if to_competitor else "sold_out_left"
+    # at most this much per day, so one bad day cannot destroy the whole reputation
+    lost = state["stats"].get("sold_out_rep", 0)
+    delta = max(CONFIG["reputation"][key], -(CONFIG["reputation"]["sold_out_daily_cap"] - lost))
+    delta = _change_reputation(state, delta)
+    state["stats"]["sold_out_rep"] = lost - delta
+    return delta
 
 
 def _ev_discard_tray(state, ev):
@@ -1337,6 +1387,7 @@ def _ev_cancel_order(state, ev):
 def _ev_auto_serve(state, ev):
     """Bot or manager serves the student at the front of the queue."""
     shop = ev.get("shop")
+    mechanics.of(shop).serve_at(state, ev.get("machine"))  # v8: which vending machine
     if not is_auto(state, shop):
         raise GameError("Someone has to serve here in person.")
     if not state["open"]:
@@ -1400,6 +1451,8 @@ def _ev_fill_front(state, ev):
         raise GameError(f"The shelves can only be filled in the morning, before {int(mech.p['fill_until']):02d}:00.")
     if state["closed"]:
         raise GameError("The shop is closed for today.")
+    if hasattr(mech, "refill"):  # v8: vending machines are filled one by one (or all at once)
+        return _ev_refill_machine(state, ev)
     amounts = ev.get("amounts")
     if amounts is not None:
         for product, n in amounts.items():
@@ -1420,7 +1473,7 @@ def _ev_repair(state, ev):
     mech = mechanics.of(shop)
     if not hasattr(mech, "repair"):
         raise GameError("Nothing to repair here.")
-    cost = mech.repair(state, product)
+    cost = mech.repair(state, ev.get("machine") or product)
     return {"toast": f"Machine repaired for {euro(cost)}"}
 
 
@@ -1455,6 +1508,78 @@ def _ev_set_happy_hour(state, ev):
         raise GameError("This shop has no happy hour.")
     mech.set_discount(state, ev.get("discount"))
     return {"toast": f"Happy hour: {round(mech.discount(state) * 100)} % off"}
+
+
+def _ev_refill_machine(state, ev):
+    """v8: fill one vending machine on the campus from the storage (P25)."""
+    shop = ev.get("shop")
+    _require_owned(state, shop)
+    mech = mechanics.of(shop)
+    if not hasattr(mech, "refill"):
+        raise GameError("There are no machines here.")
+    if state["closed"]:
+        raise GameError("The shop is closed for today.")
+    moved = mech.refill(state, ev.get("machine"))
+    if not moved:
+        raise GameError("Nothing to refill: the storage is empty or the machine is full.")
+    return {"toast": "Refilled: " + ", ".join(f"{n}x {PRODUCTS[p]['name']}" for p, n in moved.items()), "moved": moved}
+
+
+def _ev_collect_cash(state, ev):
+    """v8: take the money out of a vending machine. Bring it to the office (deposit_cash)."""
+    shop = ev.get("shop")
+    _require_owned(state, shop)
+    mech = mechanics.of(shop)
+    if not hasattr(mech, "collect"):
+        raise GameError("There are no machines here.")
+    amount = mech.collect(state, ev.get("machine"))
+    if not amount:
+        raise GameError("The cash box is empty.")
+    state["carried_cash"] = state.get("carried_cash", 0) + amount
+    return {"toast": f"Collected {euro(amount)} - bring it to the office", "amount": amount}
+
+
+def _ev_deposit_cash(state, ev):
+    """v8: hand in the collected cash at the vending office."""
+    shop = ev.get("shop")
+    _require_owned(state, shop)
+    amount = state.get("carried_cash", 0)
+    if not amount:
+        raise GameError("You carry no cash.")
+    state["money"] += amount
+    state["carried_cash"] = 0
+    return {"toast": f"Deposited {euro(amount)}", "amount": amount}
+
+
+def _ev_autosave(state, ev):
+    """v8: the browser reports the clock every few seconds, so the save is never far behind."""
+    return {}
+
+
+def _ev_buy_from_jep(state, ev):
+    """v8 easter egg: Jep sells you a joint; you are high for a few game minutes."""
+    try:
+        easter_eggs.buy_from_jep(state)
+    except easter_eggs.EasterEggError as error:
+        raise GameError(str(error)) from error
+    return {"toast": f"Jep: 'Enjoy, my friend.' (-{euro(easter_eggs.JEP['price'])})", "high_until": state["high_until"]}
+
+
+def _ev_enter_casino(state, ev):
+    """v8 easter egg: you found the ladder under the broken machine."""
+    casino = state.setdefault("casino", {"spins": 0, "net": 0})
+    first = not casino.get("found")
+    casino["found"] = True
+    return {"first_visit": first}
+
+
+def _ev_roulette(state, ev):
+    """v8 easter egg: one roulette spin (red/black, even/odd or a dozen)."""
+    try:
+        result = easter_eggs.spin(state, ev.get("bet"), _whole(ev.get("amount"), "amount"))
+    except easter_eggs.EasterEggError as error:
+        raise GameError(str(error)) from error
+    return result
 
 
 def _ev_checkout(state, ev):
@@ -1507,6 +1632,13 @@ HANDLERS = {
     "checkout": _ev_checkout,
     "assemble": _ev_assemble,
     "set_happy_hour": _ev_set_happy_hour,
+    "refill_machine": _ev_refill_machine,
+    "autosave": _ev_autosave,
+    "collect_cash": _ev_collect_cash,
+    "deposit_cash": _ev_deposit_cash,
+    "buy_from_jep": _ev_buy_from_jep,
+    "enter_casino": _ev_enter_casino,
+    "roulette": _ev_roulette,
 }
 
 
@@ -1571,7 +1703,7 @@ def objective(state: dict) -> str:
         if target:
             return f"{runs}. Save up and buy the next shop: {SHOPS[target]['name']} ({euro(acquisition_cost(target))})."
         return "Your managers run every shop on the map."
-    if ds == CLOSING and state["shops"]["cafe"]["manager_hired"]:
+    if ds == CLOSING and state["shops"]["cafe"]["manager"]:  # v8: only a working manager cleans
         done = sum(state["cleaning"].values())
         return f"Your manager cleans the café ({done}/{len(state['cleaning'])})."
     special = mechanics.of(ws).objective(state, ds) if ws else None
@@ -1658,6 +1790,11 @@ def view(state: dict) -> dict:
         "for_sale": next_target(state) if buy_blocker(state) is None else None,
         "zones_open": [z for z in CONFIG["zones"] if zone_open(state, z)],
         "zone_news": state.get("zone_news", []),
+        "carried_cash": state.get("carried_cash", 0),
+        # v8 easter eggs
+        "jep": state.get("jep"),
+        "high_until": state.get("high_until", 0),
+        "casino": state.get("casino", {"spins": 0, "net": 0}),
         "weather": state.get("weather"),
         "items_available": [i for i in ITEMS if item_available(state, i)],
         "monopoly": monopoly_progress(state),
@@ -1679,10 +1816,11 @@ def _today(state: dict) -> dict:
     shops = owned_shops(state)
     revenue = sum(stats["shops"][s]["revenue"] for s in shops)
     tips = sum(stats["shops"][s].get("tips", 0) for s in shops)
-    gain = revenue + tips - stats["purchase_cost"] - stats["spending"]
+    gain = revenue + tips - stats["purchase_cost"] - stats["spending"] - stats.get("jep", 0) + stats.get("casino", 0)
     market = revenue + _bot_revenue(state)
     return {
         "revenue": revenue, "tips": tips, "purchase_cost": stats["purchase_cost"], "spending": stats["spending"],
+        "jep": stats.get("jep", 0), "casino": stats.get("casino", 0),
         "gain": gain,
         "served": sum(stats["shops"][s]["served"] for s in shops),
         "lost": sum(stats["shops"][s]["lost"] for s in shops),

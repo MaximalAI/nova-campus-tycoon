@@ -111,3 +111,16 @@ Decisions that the brief left open or that came up during implementation. Change
 - Gelado Kiosk: display portions melt 3 game hours after filling and overnight; the freezer keeps. A manager keeps the display half full.
 - The beach weather (waves 1 to 5, temperature 16 to 34 °C) is seeded per day and shown in the morning (P30).
 - The mechanics run on ticks every full hour (plus 11:30, 14:30, 17:30, 18:30), sent by the browser and by the simulation.
+
+## v8 changes
+- Monopoly counter: owned shops / all shops (1/9 at the start).
+- Sold-out reputation: -1 per customer who goes home, -2 per customer who goes to a competitor instead, every time (v4 to v7: once per day), capped at -15 per day.
+- Manager proposal: (sold + customers who found it sold out) x buffer. The summary keeps the sales of all shops (`by_shop`).
+- A manager hired during the day starts the next morning; the player cleans that evening.
+- SnackBots: three machines on the campus with their own stock, cash box and breakdowns. Sales go into the cash box; the player collects it and deposits it at the office (the manager does this himself).
+- Shop prices about 15 % lower, the second shop €300. Measured with 10 seeds: first purchase on day 6, the last shop on day 36.
+- Saving: WAL journal, synchronous FULL, a backup copy of the last good state in the same row, damaged files are moved aside. The browser sends an `autosave` event every 10 s and when the page is hidden.
+- Sound is synthesised (Web Audio). Music and effects are separate switches in the pause menu, stored in localStorage (wrapped in try/catch; without storage the default is on).
+- Jep: €10, high for 10 game minutes, one at a time. His look is a neutral, distinctive outfit (bucket hat, sunglasses, flower shirt); we chose not to code him by ethnicity.
+- Casino: European roulette (0 to 36), bets red/black, even/odd (1:1) and dozens (2:1); bets from €10 to €1,000 and never more than your cash. The number is seeded, so tests are repeatable.
+- Jep and casino money count in the day profit and the day gain next to the cash.

@@ -444,23 +444,23 @@ HUD: a monopoly progress bar shows owned shops with a hired manager out of nine.
 
 ### 14.6 Prices and balance (starting values, calibrated by the headless simulation)
 
-Values after the calibration with the headless simulation (`uv run python simulation.py --campaign --seeds 30`: 29 of 30 games won by day 56).
-The manager of Your Café costs €100.
+Values after the calibration with the headless simulation (`uv run python simulation.py --campaign --seeds 10`: 10 of 10 games won, the last shop around day 36).
+The manager of Your Café costs €100. v8 (team decision 12.11.2026): the shops are cheaper, the second shop costs €300 instead of €700.
 
-| # | Shop | Acquisition | Manager | Simulated purchase day (median) | Target |
-|---|---|---|---|---|---|
-| 2 | Café da Esquina | €700 | €120 | 11 | 10 |
-| 3 | SnackBots | €750 | €120 | 17 | 15 |
-| 4 | Mercado & Go | €1,400 | €200 | 22 | 20 |
-| 5 | Bowl Bar | €2,000 | €250 | 26 | 25 |
-| 6 | Nova Mensa | €2,600 | €300 | 30 | 30 |
-| 7 | Surf Shack | €3,400 | €350 | 35 | 35 |
-| 8 | Praia Bar | €4,200 | €400 | 40 | 40 |
-| 9 | Gelado Kiosk | €5,000 | €400 | 45 | 45 |
+| # | Shop | Acquisition (v8) | v7 | Manager | Simulated purchase day (median) | Target |
+|---|---|---|---|---|---|---|
+| 2 | Café da Esquina | €300 | €700 | €120 | 6 | 6 |
+| 3 | SnackBots | €600 | €750 | €120 | 8.5 | 10 |
+| 4 | Mercado & Go | €1,200 | €1,400 | €200 | 12 | 14 |
+| 5 | Bowl Bar | €1,700 | €2,000 | €250 | 16.5 | 18 |
+| 6 | Nova Mensa | €2,200 | €2,600 | €300 | 20.5 | 22 |
+| 7 | Surf Shack | €3,000 | €3,400 | €350 | 24 | 26 |
+| 8 | Praia Bar | €3,600 | €4,200 | €400 | 31 | 30 |
+| 9 | Gelado Kiosk | €4,300 | €5,000 | €400 | 36 | 34 |
 
 Other balance values of v7: the campus pool has 40 students with €28 each per day (v6: 25 with €16), the lunch phase lasts until 14:00, and the beach has 20 visitors with €60 each. Expensive beach products have their own price limit (a surf class can cost up to €60).
 
-Balance target (team decision 11.11.2026): a good player buys Café da Esquina around day 10 and every further shop about 5 days after the previous one, so the campus zone is complete around day 30 and the beach around day 45. The headless simulation plays many seeds with a simple strategy (buy as soon as allowed, hire as soon as possible) and reports the day each shop was bought; prices are adjusted until the median hits the target. Wholesale items, products, start prices and all mechanic parameters live in `config.py`.
+Balance target (team decision 11.11.2026, updated 12.11.2026 for v8): a good player buys Café da Esquina around day 6 and every further shop about 4 days after the previous one, so the campus zone is complete around day 22 and the beach around day 34. The headless simulation plays many seeds with a simple strategy (buy as soon as allowed, hire as soon as possible) and reports the day each shop was bought; prices are adjusted until the median hits the target. Wholesale items, products, start prices and all mechanic parameters live in `config.py`.
 
 ### 14.7 New pop-ups and toasts
 

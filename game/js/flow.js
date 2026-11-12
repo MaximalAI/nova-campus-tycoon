@@ -70,9 +70,12 @@ class Flow {
       case "WHOLESALE_SHOPPING": return v.in_wholesaler ? { x: 32, z: 2.3 } : P.wholesale.doorOut;
       case "WALK_TO_CAFE": { const b = this.bagHasItemsFor(ws) ? ws : this.bagShop(); return b ? P[b].storage : P[ws].storage; }
       case "SET_PRICES": return P[ws].register;
-      case "SHOP_OPEN": return this.game.isManual(ws) && !this.playerIn(ws) ? P[ws].serve : null;
+      case "SHOP_OPEN": {
+        if (P[ws].machines) return this.machineTarget(ws);
+        return this.game.isManual(ws) && !this.playerIn(ws) ? P[ws].serve : null;
+      }
       case "CLOSING": {
-        if (v.shops.cafe.manager_hired) return null; // the manager cleans
+        if (v.shops.cafe.manager) return null; // the manager cleans (v8: not before his first day)
         const it = this.game.world.interactables.find((i) => i.cleaning && !v.cleaning[i.cleaning]);
         return it ? it.pos : null;
       }
@@ -700,8 +703,8 @@ class Flow {
   // -------------------------------------------------------- P14/P15 closing
   openClosing() {
     const spots = Object.values(this.cfg.cleaning_spots).map((s) => `• ${s.name}`).join("<br>");
-    if (this.v.shops.cafe.manager_hired) {
-      // v5/v6: the manager (also a newly hired one) cleans the café after closing
+    if (this.v.shops.cafe.manager) {
+      // v8: a manager cleans from his first working day on (hired today: you still clean tonight)
       this.startManagerCleaning();
       return this.game.ui.toast("Closing time - your manager cleans the café.");
     }
@@ -757,7 +760,7 @@ class Flow {
       body: (body) => {
         const tabs = el("div", "tabs");
         const content = el("div", "dlg-scroll");
-        const names = { today: "Today", stock: "Stock", competitor: "Competitor", history: "Last days", charts: "Charts" };
+        const names = { today: "Today", stock: "Stock", competitor: "Competitors", history: "Last days", charts: "Charts" };
         const draw = () => {
           tabs.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
           content.innerHTML = "";
@@ -792,6 +795,8 @@ class Flow {
       ["Tips", euro(s.tips || 0)],
       ["Purchases", euro(-s.purchase_cost)],
       ["Upgrades & staff", euro(-s.spending)],
+      ...(s.jep ? [["🌿 Jep", euro(-s.jep)]] : []), // v8 easter eggs
+      ...(s.casino ? [["🎰 Casino", this.signed(s.casino, euro)]] : []),
       ["<b>Profit</b>", `<b>${this.signed(s.profit, euro)}</b>`],
       ["Spoiled goods (part of purchases)", euro(s.spoiled_value)],
       ["Cash tonight", euro(s.money)],
@@ -840,6 +845,20 @@ class Flow {
   summaryCompetitor(box, s) {
     const products = this.cfg.products;
     const c = s.competitor;
+    // v8: all competitors at a glance
+    const rivals = s.competitors || [];
+    if (rivals.length) {
+      const market = s.revenue + rivals.reduce((a, x) => a + x.revenue, 0);
+      const pct = (r) => (market ? Math.round((r / market) * 100) : 0) + " %";
+      box.appendChild(el("div", "sum-h", `🏁 All competitors (${rivals.length})`));
+      const rows = [[`<b>☕ You</b>`, s.served, euro(s.revenue), pct(s.revenue), "-", "-", ""]];
+      for (const x of rivals) {
+        const status = x.sold_to_you ? "yours tomorrow" : x.next ? "for sale next" : !x.zone_open ? "beach closed" : "";
+        rows.push([`${x.icon} ${esc(x.name)}`, x.served, euro(x.revenue), pct(x.revenue), euro(x.avg_price), `x${x.factor.toFixed(2)}`,
+          `${euro(x.price)}${status ? ` <span class="sub">${status}</span>` : ""}`]);
+      }
+      box.appendChild(el("div", "", this.table(["Shop", "Served", "Sales", "Market share", "Avg. price", "Pull", "Price to buy"], rows)));
+    }
     if (!c) {
       box.appendChild(el("div", "note", "You own every shop on the map. Their numbers are part of your results (see Today and Stock)."));
       return;
@@ -943,7 +962,9 @@ class Flow {
           const grid = el("div", "sum-grid");
           grid.appendChild(el("div", "", `<div class="sum-h">💶 Today so far</div>` + this.table(["", ""], [
             ["Sales", euro(t.revenue || 0)], ["Tips", euro(t.tips || 0)], ["Purchases", euro(-(t.purchase_cost || 0))],
-            ["Upgrades & staff", euro(-(t.spending || 0))], ["<b>Day gain</b>", `<b>${this.signed(t.gain || 0, euro)}</b>`], ["Cash", euro(v.money)],
+            ["Upgrades & staff", euro(-(t.spending || 0))],
+            ...(t.jep ? [["🌿 Jep", euro(-t.jep)]] : []), ...(t.casino ? [["🎰 Casino", this.signed(t.casino, euro)]] : []),
+            ["<b>Day gain</b>", `<b>${this.signed(t.gain || 0, euro)}</b>`], ["Cash", euro(v.money)],
           ])));
           grid.appendChild(el("div", "", `<div class="sum-h">🙋 Customers</div>` + this.table(["", ""], [
             ["Served", t.served || 0], ["Lost", t.lost || 0], ["Market share", `${Math.round((t.market_share || 0) * 100)} %`],
@@ -1013,8 +1034,8 @@ class Flow {
         : `Next: <b>${esc(this.shopName(v.next_target))}</b>. ${esc(v.buy_blocker || "")}`)
       : "Every shop is yours.";
     this.game.ui.showDialog({
-      id: "P35", icon: "👑", title: `Monopoly ${m.done}/${m.total}`, unique: true, wide: true,
-      text: `You win when every shop on the map is yours and has a manager. ${next}`,
+      id: "P35", icon: "👑", title: `Monopoly ${m.owned}/${m.total}`, unique: true, wide: true,
+      text: `You own ${m.owned} of ${m.total} shops, ${m.done} of them with a manager. You win when every shop on the map is yours and has a manager. ${next}`,
       body: (body) => {
         body.appendChild(el("table", "sum-table mono-table", `<tr><th>#</th><th>Shop</th><th>Zone</th><th>Owner</th><th>Runs it</th><th>Price</th></tr>${rows}`));
       },
@@ -1100,9 +1121,18 @@ class Flow {
   pauseDialog() {
     const g = this.game;
     return {
-      id: "P20", icon: "⏸️", title: "Paused", urgent: true,
+      id: "P20", icon: "⏸️", title: "Paused & settings", urgent: true,
       onShow: () => { g.clock.paused = true; g.releasePointer(); },
-      text: "Everything stands still: clock, students and progress bars. Your game is saved automatically after every action, so you can close the browser and continue later.",
+      text: "Everything stands still: clock, students and progress bars. Your game is saved automatically after every action and every few seconds, so you can close the browser and continue later.",
+      // v8: music and sound effects can be switched off separately
+      body: (b) => {
+        b.innerHTML = `<div class="settings">
+          <label class="toggle"><input type="checkbox" data-snd="music" ${g.sound.musicOn ? "checked" : ""}><span>🎵 Background music</span></label>
+          <label class="toggle"><input type="checkbox" data-snd="sfx" ${g.sound.sfxOn ? "checked" : ""}><span>🔊 Sound effects</span></label>
+        </div>`;
+        b.querySelector('[data-snd="music"]').onchange = (e) => { g.sound.unlock(); g.sound.setMusic(e.target.checked); };
+        b.querySelector('[data-snd="sfx"]').onchange = (e) => { g.sound.unlock(); g.sound.setSfx(e.target.checked); };
+      },
       onClose: () => { g.clock.paused = false; },
       extra: [
         { label: "🔄 New game", cls: "secondary", action: () => this.confirmRestart() },
@@ -1213,6 +1243,7 @@ class Flow {
     a.shop = res.shop;
     a.wanted = res.items;
     a.atCounter = false; a.order = null; a.soldOut = [];
+    if (P[res.shop].machines) return this.goToMachine(a, res.shop);
     const door = P[res.shop].doorOut;
     a.walkTo(this.game.world.findPath(a.pos, { x: door.x + a.offset.x, z: door.z + a.offset.z }), () => this.reachShop(a));
   }
@@ -1290,7 +1321,33 @@ class Flow {
     } else this.handleDecision(a, decision);
   }
 
+  // v8: after his proposal is confirmed (or at 07:00), a manager walks to the wholesaler,
+  // buys the supplies and carries them back to his shop.
+  checkSupplyTrips() {
+    const v = this.v;
+    if (!v || !v.manager_proposals) return;
+    this.trips = this.trips || {};
+    for (const [shop, p] of Object.entries(v.manager_proposals)) {
+      const key = `${v.day}:${shop}`;
+      if (!p.done || this.trips[key] || !p.bought || !Object.keys(p.bought).length) continue;
+      const w = this.game.workers[shop];
+      if (!w || !w.figure.visible || w.busy) continue;
+      this.trips[key] = true;
+      if (this.game.clock.t > this.cfg.time.open + 0.5) continue; // too late in the day for a walk
+      const world = this.game.world, pt = P[shop], wd = P.wholesale.doorOut;
+      const go = world.findPath(pt.doorOut, wd), back = world.findPath(wd, pt.doorOut);
+      w.run([
+        { walk: pt.doorIn }, { walk: pt.doorOut }, ...go.map((q) => ({ walk: q })), { walk: wd },
+        { wait: 8, work: "shop", icon: "🛒", text: "Buying supplies" },
+        ...back.map((q) => ({ walk: q })), { walk: pt.doorOut }, { walk: pt.doorIn },
+        { wait: 3, work: "shop", icon: "📦", text: "Stocking the shelves" },
+        { walk: w.home }, { face: pt.homeFace },
+      ], { trip: true });
+    }
+  }
+
   updateStudents(dtReal, dtGameMin) {
+    this.checkSupplyTrips();
     const t = this.game.clock.t;
     const speed = this.game.clock.running ? this.game.clock.speed : 0;
     for (const a of this.agents.values()) {
@@ -1679,65 +1736,129 @@ class Flow {
     ui.showDialog(dlg);
   }
 
-  // ------------------------------------------------ v7 SnackBots: P25 refill, P26 broken, P27 office
-  machineLabel(shop, product) {
+  // ------------------------------------- v8 SnackBots: machines on the campus (P25, P26, P27)
+  machineLabel(shop, mid) {
     const v = this.v;
     if (!v || v.shops[shop].owner !== "player") return null;
-    const m = v.shops[shop].mech, name = this.cfg.products[product].name;
-    if (m.broken && m.broken[product]) return `Repair: ${name} machine`;
-    return `Refill: ${name} (${v.shops[shop].front[product] || 0}/${m.capacity})`;
+    const m = v.shops[shop].mech.machines[mid];
+    if (!m) return null;
+    if (m.broken) return "Repair the machine";
+    const n = Object.values(m.stock).reduce((a, x) => a + x, 0);
+    return `Snack machine (${n} items${m.cash ? ` · ${euro(m.cash)} cash` : ""})`;
   }
-  useMachine(shop, product) {
-    const v = this.v, m = v.shops[shop].mech;
-    if (m.broken && m.broken[product]) return this.openBroken(shop, product);
-    return this.openRefill(shop, product);
+  useMachine(shop, mid) {
+    const m = this.v.shops[shop].mech.machines[mid];
+    if (m && m.broken) return this.openBroken(shop, mid);
+    return this.openRefill(shop, mid);
   }
   storageFor(shop, product) {
     // portions the storage can still make of a product
     const s = this.v.shops[shop].stock;
     return Math.min(...Object.entries(this.cfg.products[product].uses).map(([i, q]) => Math.floor((s[i] ? s[i].units : 0) / q)));
   }
-  openRefill(shop, product) {
-    const v = this.v, spec = this.cfg.products[product], m = v.shops[shop].mech;
-    const inMachine = v.shops[shop].front[product] || 0, room = v.shops[shop].front_room[product] || 0;
-    const store = this.storageFor(shop, product);
-    const others = this.cfg.shops[shop].products.filter((p) => p !== product && (v.shops[shop].front_room[p] || 0) > 0 && this.storageFor(shop, p) > 0);
+  openRefill(shop, mid) {
+    const v = this.v, s = v.shops[shop], m = s.mech.machines[mid], cap = s.mech.capacity;
+    const name = P[shop].machines[mid].name;
+    const rows = this.cfg.shops[shop].products.map((p) => ({ label: `${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}`,
+      value: `${m.stock[p] || 0} / ${cap} · storage ${this.storageFor(shop, p)}` }));
+    rows.push({ label: "💰 Cash box", value: euro(m.cash) });
+    const canFill = this.cfg.shops[shop].products.some((p) => (m.stock[p] || 0) < cap && this.storageFor(shop, p) > 0);
     this.game.ui.showDialog({
-      id: "P25", icon: spec.icon, title: `Refill: ${spec.name} machine`, unique: true,
-      text: "Students take what is in the machine - nobody has to serve. Refill it from your storage.",
-      rows: [{ label: "In the machine", value: `${inMachine} / ${m.capacity}` }, { label: "In your storage", value: String(store) }],
-      extra: others.length ? [{ label: "Refill all machines", cls: "secondary", action: () => { this.game.ui.closeDialog(); this.send("fill_front", { shop }, this.ok()); } }] : [],
-      secondary: { label: "Cancel" },
-      primary: { label: `Refill ${Math.min(room, store)}`, disabled: !Math.min(room, store),
-        action: () => this.send("fill_front", { shop, amounts: { [product]: Math.min(room, store) } }, this.ok()) },
+      id: "P25", icon: "🤖", title: `Snack machine: ${esc(name)}`, unique: true,
+      text: "Students take what is in the machine - nobody has to serve. Refill it from the office storage and take the money " +
+        "out of the cash box. The cash is yours once you bring it to the SnackBots office." +
+        (v.carried_cash ? `<div class="note">You carry ${euro(v.carried_cash)}.</div>` : ""),
+      rows,
+      extra: m.cash ? [{ label: `Collect ${euro(m.cash)}`, cls: "secondary", action: () => { this.game.ui.closeDialog(); this.send("collect_cash", { shop, machine: mid }, this.ok()); } }] : [],
+      secondary: { label: "Close" },
+      primary: { label: "Refill", disabled: !canFill || v.closed,
+        action: () => this.send("refill_machine", { shop, machine: mid }, this.ok()) },
     });
   }
-  openBroken(shop, product) {
-    const v = this.v, spec = this.cfg.products[product], cost = v.shops[shop].mech.repair_cost;
+  openBroken(shop, mid) {
+    const v = this.v, cost = v.shops[shop].mech.repair_cost, name = P[shop].machines[mid].name;
     this.game.ui.showDialog({
-      id: "P26", icon: "🛠️", title: `Machine broken: ${spec.name}`, unique: true,
-      text: `The ${esc(spec.name)} machine is out of order. Until it is repaired, nobody can buy ${esc(spec.name)} here.`,
-      rows: [{ label: "Repair fee", value: euro(cost) }, { label: "In the machine", value: String(v.shops[shop].front[product] || 0) }],
+      id: "P26", icon: "🛠️", title: `Machine broken: ${esc(name)}`, unique: true,
+      text: "This machine is out of order. Until it is repaired, nobody can buy here.",
+      rows: [{ label: "Repair fee", value: euro(cost) }, { label: "💰 Cash box", value: euro(v.shops[shop].mech.machines[mid].cash) }],
       secondary: { label: "Later" },
       primary: { label: `Repair for ${euro(cost)}`, disabled: v.money < cost,
-        action: () => this.send("repair", { shop, product }, this.ok()) },
+        action: () => this.send("repair", { shop, machine: mid }, this.ok()) },
     });
+  }
+  officeLabel(shop) {
+    const v = this.v;
+    if (!v) return "Vending company office";
+    if (v.shops[shop].owner === "player" && v.carried_cash) return `Deposit ${euro(v.carried_cash)}`;
+    return "Vending company office";
   }
   openOffice(shop) {
     const v = this.v, s = v.shops[shop];
     if (s.owner !== "player") return this.openCompetitor(shop);
     const cost = this.cfg.shops[shop].manager_cost;
-    const who = s.manager ? "Your manager refills the machines and repairs breakdowns." : s.manager_hired ? "Your manager starts tomorrow morning."
-      : `A manager of the vending company refills the machines and repairs breakdowns for you, so you are free for the next shop. ${euro(cost)}.`;
+    const ms = Object.entries(s.mech.machines || {});
+    const who = s.manager ? "Your manager refills the machines, repairs breakdowns and brings the cash." : s.manager_hired ? "Your manager starts tomorrow morning."
+      : `A manager of the vending company refills the machines, repairs them and brings the cash, so you are free for the next shop. ${euro(cost)}.`;
+    const rows = ms.map(([mid, m]) => ({ label: `🤖 ${esc(P[shop].machines[mid].name)}${m.broken ? " · broken" : ""}`,
+      value: `${Object.values(m.stock).reduce((a, x) => a + x, 0)} items · ${euro(m.cash)}` }));
     this.game.ui.showDialog({
-      id: "P27", icon: "🏢", title: "Vending company office", unique: true, text: who,
-      rows: this.cfg.shops[shop].products.map((p) => ({ label: `${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}`, value: euro(s.prices[p]) })),
+      id: "P27", icon: "🏢", title: "Vending company office", unique: true,
+      text: who + (v.carried_cash ? `<div class="note">You carry <b>${euro(v.carried_cash)}</b> from the machines.</div>` : ""),
+      rows,
       extra: [
+        ...(v.carried_cash ? [{ label: `Deposit ${euro(v.carried_cash)}`, cls: "secondary", action: () => { this.game.ui.closeDialog(); this.send("deposit_cash", { shop }, this.ok()); } }] : []),
         ...(this.canSetPrices(shop) ? [{ label: "Set prices", cls: "secondary", action: () => { this.game.ui.closeDialog(); this.openPrices(shop); } }] : []),
         { label: "Upgrades", cls: "secondary", action: () => { this.game.ui.closeDialog(); this.openUpgrades(); } },
       ],
       primary: s.manager_hired ? { label: "Close" } : { label: `Hire manager (${euro(cost)})`, disabled: v.money < cost,
         action: () => this.send("hire_manager", { shop }, this.ok(() => this.checkEnd())) },
+    });
+  }
+
+  // v8: where to go next while you run SnackBots: cash to the office, else the emptiest machine
+  machineTarget(shop) {
+    const v = this.v, s = v.shops[shop];
+    if (v.carried_cash > 0) return P[shop].upBoard;
+    let best = null, score = -1;
+    for (const [mid, m] of Object.entries(s.mech.machines || {})) {
+      const items = Object.values(m.stock).reduce((a, x) => a + x, 0);
+      const sc = (m.broken ? 1000 : 0) + m.cash / 10 + (s.mech.capacity * 3 - items);
+      if (sc > score) { score = sc; best = mid; }
+    }
+    return best ? P[shop].machines[best].front : null;
+  }
+
+  // v8: a student who wants something from SnackBots walks to a machine on the campus
+  goToMachine(a, shop) {
+    const s = this.v.shops[shop], ms = P[shop].machines;
+    const mine = s.owner === "player";
+    let best = null, bd = 1e9;
+    for (const [mid, m] of Object.entries(ms)) {
+      const st = mine ? s.mech.machines[mid] : null;
+      const ok = !st || (!st.broken && (a.wanted || []).some((p) => (st.stock[p] || 0) > 0));
+      const d = dist2(a.pos, m.front) + (ok ? 0 : 1e6);
+      if (d < bd) { bd = d; best = mid; }
+    }
+    a.machine = best;
+    const f = ms[best].front;
+    a.walkTo(this.game.world.findPath(a.pos, { x: f.x + a.offset.x * 0.3, z: f.z + a.offset.z * 0.3 }), () => {
+      if (this.v.closed || a.shop !== shop) return this.startWander(a);
+      a.faceTo(ms[best].pos);
+      a.mode = "served";
+      this.send("join_queue", { student: a.id, shop }, (r) => {
+        if (!r.ok || r.result.action) return this.handleDecision(a, r.ok ? r.result : null);
+        a.emote = { icon: "🪙", until: performance.now() + 1500 };
+        setTimeout(() => this.send("auto_serve", { student: a.id, shop, machine: best }, (res) => {
+          const got = res.ok ? res.result.items : [];
+          a.emote = { icon: got.length ? "😊" : "😞", until: performance.now() + 3000 };
+          if (res.ok && !got.length && this.v.shops[shop].owner === "player") {
+            this.game.ui.toast(`${this.shopName(shop)}: the machine is empty - the customer leaves`, true);
+            this.repToast(res.result.rep_delta, "sold out");
+          }
+          a.shop = null; a.wanted = null; a.machine = null;
+          this.startWander(a);
+        }), 500);
+      });
     });
   }
 

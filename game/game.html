@@ -33,7 +33,7 @@
       </div>
       <div class="money-row">
         <div id="money">€50.00</div>
-        <button id="gain" title="Today's gain so far - click for statistics">today €0.00</button>
+        <button id="gain" title="Today's gain so far - click for statistics"><span id="gain-text">today €0.00</span><span class="info-i">i</span></button>
       </div>
       <button id="skip-btn" class="hidden" title="Jump to 08:00 and open the café">⏩ Start the day (08:00)</button>
     </div>
@@ -44,7 +44,7 @@
     <div id="minimap" class="glass" title="Click or press M to open the map"><canvas id="minimap-canvas" width="200" height="200"></canvas></div>
     <div id="bigmap" class="hidden">
       <div class="glass bigmap-box">
-        <div class="bigmap-head"><b>🗺️ Campus map</b><span>Click a place to go there</span><button id="bigmap-close">✕</button></div>
+        <div class="bigmap-head"><b>🗺️ Campus map</b><span>Drag to look around, scroll to zoom. Click a place to go there.</span><button id="bigmap-close">✕</button></div>
         <div class="bigmap-wrap"><canvas id="bigmap-canvas" width="560" height="560"></canvas><div id="bigmap-spots"></div></div>
       </div>
     </div>

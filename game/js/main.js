@@ -22,6 +22,8 @@ class Game {
     this.hudTimer = 0;
     this.highlighted = null;
     this.bridge = new Bridge(this);
+    this.sound = new Sound(this); // v8
+    this.inCasino = false; // v8: underground casino (easter egg)
     this.ui = new UI(this, this.root);
   }
 
@@ -65,6 +67,7 @@ class Game {
       if (P[key].vending) return;
       this.workers[key] = new StaffAgent(this, key, { shirt: BUILDINGS[key].trim, pants: 0x22223b, hair: hairs[i % hairs.length], skin: [0xf1c27d, 0xe0ac69, 0xc68642, 0xffdbac][i % 4] }, { apron: true });
     });
+    this.eggs = new EasterEggs(this); // v8: Jep and the casino
     this.raycaster = new THREE.Raycaster();
     this.minimap = this.root.querySelector("#minimap-canvas").getContext("2d");
     this.bindInput();
@@ -96,23 +99,56 @@ class Game {
   }
 
   // ---------------------------------------------------------------- big map
+  // v8: the big map can be dragged and zoomed (wheel), shows the whole area including the
+  // beach, and the people on it move while it is open.
   openBigMap() {
     if (!this.view || this.screen !== "game") return;
     const box = this.root.querySelector("#bigmap");
     box.classList.remove("hidden");
     this.releasePointer();
-    const R = this.bigMapR(), C = this.bigMapCenter();
+    this.bigView = { R: this.bigMapR(), C: { ...this.bigMapCenter() } };
+    if (!this.bigMapBound) this.bindBigMap();
+    this.renderBigMap();
+  }
+  bindBigMap() {
+    this.bigMapBound = true;
+    const wrap = this.root.querySelector(".bigmap-wrap");
+    let drag = null;
+    wrap.addEventListener("pointerdown", (e) => {
+      if (e.target.closest(".map-spot")) return;
+      drag = { x: e.clientX, y: e.clientY, C: { ...this.bigView.C }, moved: false };
+      wrap.setPointerCapture(e.pointerId);
+    });
+    wrap.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const scale = (2 * this.bigView.R) / wrap.clientWidth;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      this.bigView.C = { x: clamp(drag.C.x - dx * scale, -60, 60), z: clamp(drag.C.z - dy * scale, -45, 110) };
+      this.renderBigMap();
+    });
+    const end = () => { drag = null; };
+    wrap.addEventListener("pointerup", end);
+    wrap.addEventListener("pointercancel", end);
+    wrap.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      this.bigView.R = clamp(this.bigView.R * (e.deltaY > 0 ? 1.12 : 1 / 1.12), 30, 110);
+      this.renderBigMap();
+    }, { passive: false });
+  }
+  renderBigMap(spotsToo = true) {
+    const { R, C } = this.bigView;
     this.drawMap(this.root.querySelector("#bigmap-canvas").getContext("2d"), 560, R, false, C);
+    if (!spotsToo) return;
     const spots = this.root.querySelector("#bigmap-spots");
     const v = this.view;
     const places = [{ key: "wholesale", label: "🏬 Wholesaler", color: "#2c6fbb", at: { x: 40, z: 12.5 } }];
     for (const [key, spec] of Object.entries(this.config.shops)) {
       const s = v.shops[key], b = BUILDINGS[key];
-      if (!b || !this.world.zoneVisible(b.zone)) continue;
+      if (!b || !this.world.zoneVisible(b.zone)) continue; // closed zones: drawn on the map, no travel
       const mine = s.owner === "player";
       const name = key === "cafe" ? "Your café" : spec.name;
       const tag = mine && key !== "cafe" ? " (yours)" : s.sold ? " (yours tomorrow)" : v.for_sale === key ? " (for sale)" : "";
-      // labels below the building, or above it for the shops north of the main path
       // labels below the building; north of the main path and at the beach above it
       const above = b.z1 < -10 || b.zone === "beach";
       const at = { x: (b.x0 + b.x1) / 2, z: above ? b.z0 - 2.8 : b.z1 + 2.8 };
@@ -121,7 +157,8 @@ class Game {
     const block = this.teleportBlock();
     // v7: many shops - push labels apart so they never cover each other (pixels of a 560 px map)
     const px = (c, o) => ((c - o + R) / (2 * R)) * 560;
-    const boxes = places.map((p) => ({ p, x: px(p.at.x, C.x), y: px(p.at.z, C.z), w: p.label.length * 7.2 + 26 }));
+    const boxes = places.map((p) => ({ p, x: px(p.at.x, C.x), y: px(p.at.z, C.z), w: p.label.length * 7.2 + 26 }))
+      .filter((b) => b.x > -40 && b.x < 600 && b.y > -20 && b.y < 580);
     boxes.sort((a, b) => a.y - b.y);
     for (let i = 0; i < boxes.length; i++) {
       for (let j = 0; j < i; j++) {
@@ -144,6 +181,7 @@ class Game {
     const block = this.teleportBlock();
     if (block) { this.ui.toast(block, true); return; }
     if (this.world.buildingAt(this.player.pos) === "wholesale") this.flow.leftWholesaleByMap();
+    if (this.inCasino) this.eggs.leaveCasino(true);
     if (key === "wholesale") {
       this.player.teleport({ x: 23.6, z: 0 }, Math.PI / 2);
       this.camYaw = -Math.PI / 2;
@@ -151,6 +189,11 @@ class Game {
     this.flow.zoneFlags = {};
     this.closeBigMap();
     this.fadeQuick();
+  }
+  // v8: tell Python the game time (the bridge saves after every batch)
+  autosave() {
+    if (this.screen !== "game" || !this.view || this.view.status !== "running" || !this.bridge) return;
+    this.bridge.send("autosave", {});
   }
   // In front of a shop, looking at its door (the café: looking at the campus, as since v2)
   spawnAt(shop) {
@@ -220,6 +263,7 @@ class Game {
     this.clock.paused = false;
     this.ui.showHud(true);
     if (this.ui.current && this.ui.current.id === "P00") this.ui.closeDialog();
+    this.eggs.reset();
     // v5: the day starts in front of the shop you run yourself
     this.spawnAt(view.work_shop || "cafe");
     for (const w of Object.values(this.workers)) w.reset();
@@ -235,6 +279,9 @@ class Game {
   bindInput() {
     const keys = { ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down", ArrowLeft: "left", KeyA: "left",
       ArrowRight: "right", KeyD: "right", ShiftLeft: "run", ShiftRight: "run" };
+    // v8: browsers allow sound only after a click or a key press
+    window.addEventListener("pointerdown", () => this.sound.unlock(), true);
+    window.addEventListener("keydown", () => this.sound.unlock(), true);
     window.addEventListener("keydown", (e) => {
       if (!this.view && e.code !== "Enter") return;
       if (keys[e.code]) { this.input[keys[e.code]] = true; if (e.code.startsWith("Arrow")) e.preventDefault(); }
@@ -262,8 +309,15 @@ class Game {
     window.addEventListener("blur", () => { for (const k in this.input) this.input[k] = false; });
     // v5: leaving the browser tab pauses the game
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden && this.screen === "game" && this.view && this.view.status === "running") this.autoPause();
+      if (document.hidden && this.screen === "game" && this.view && this.view.status === "running") {
+        this.autoPause();
+        this.autosave(); // v8: save right away when the tab is hidden (laptop closed, app switched)
+      }
     });
+    // v8 safety: save when the page goes away, and every 10 seconds while playing
+    window.addEventListener("pagehide", () => this.autosave());
+    window.addEventListener("beforeunload", () => this.autosave());
+    setInterval(() => { if (!document.hidden) this.autosave(); }, 10000);
 
     const canvas = this.renderer.domElement;
     let drag = null;
@@ -469,14 +523,20 @@ class Game {
       for (const wk of Object.values(this.workers)) wk.tick(dt * (c.running ? c.speed : 0), dtGameMin);
       this.separatePeople();
       this.updateWorldState(now);
+      this.eggs.update(dt);
     }
     this.applyLighting(this.screen === "game" ? this.clock.t : 12.5);
     this.updateCamera(dt);
+    this.eggs.afterCamera();
     if (this.screen === "game" && v) this.updateBuildingFade();
     this.updateLabels();
     this.renderer.render(this.scene, this.camera);
     this.hudTimer += dt;
-    if (this.hudTimer > 0.1 && this.view) { this.hudTimer = 0; this.ui.updateHud(); this.drawMinimap(); }
+    if (this.hudTimer > 0.1 && this.view) {
+      this.hudTimer = 0; this.ui.updateHud(); this.drawMinimap();
+      // v8: the people on the open big map move too (canvas only, the labels stay clickable)
+      if (this.bigView && !this.root.querySelector("#bigmap").classList.contains("hidden")) this.renderBigMap(false);
+    }
   }
 
   updateBuildingFade() {
@@ -564,6 +624,7 @@ class Game {
         ui.placeLabel(e, new THREE.Vector3(w.pos.x, 2.25, w.pos.z), this.camera, W, H);
       }
     }
+    if (this.screen === "game" && this.view) this.eggs.labels(ui, W, H);
     ui.endLabels();
   }
 
@@ -625,14 +686,26 @@ class Game {
     ctx.beginPath(); ctx.arc(mx(0), my(6), 8 / (2 * R) * S, 0, Math.PI * 2); ctx.fill();
     const v = this.view;
     for (const [key, b] of Object.entries(BUILDINGS)) {
-      if (!this.world.zoneVisible(b.zone)) continue;
+      const locked = !this.world.zoneVisible(b.zone);
+      if (locked && small) continue;
       const shop = this.config.shops[key];
-      ctx.fillStyle = key === "wholesale" ? "#2c6fbb" : v.shops[key].owner === "player" ? "#2e8b57" : v.for_sale === key ? "#e67e22" : "#c0392b";
+      ctx.fillStyle = locked ? "#9e9e9e" : key === "wholesale" ? "#2c6fbb" : v.shops[key].owner === "player" ? "#2e8b57" : v.for_sale === key ? "#e67e22" : "#c0392b";
       ctx.fillRect(mx(b.x0), my(b.z0), mx(b.x1) - mx(b.x0), my(b.z1) - my(b.z0));
       ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5 * k;
       ctx.strokeRect(mx(b.x0), my(b.z0), mx(b.x1) - mx(b.x0), my(b.z1) - my(b.z0));
       ctx.font = `${small ? 16 : 30}px serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(key === "wholesale" ? "🏬" : shop.icon || "🏪", mx((b.x0 + b.x1) / 2), my((b.z0 + b.z1) / 2));
+      ctx.fillText(locked ? "🔒" : key === "wholesale" ? "🏬" : shop.icon || "🏪", mx((b.x0 + b.x1) / 2), my((b.z0 + b.z1) / 2));
+      if (locked) { // v8: you can look at the beach on the big map before it opens
+        ctx.font = "700 13px sans-serif"; ctx.fillStyle = "#3d3d3d";
+        ctx.fillText(shop.name, mx((b.x0 + b.x1) / 2), my(b.z0) - 10);
+      }
+      // v8: SnackBots' machines on the campus
+      if (P[key] && P[key].machines) {
+        for (const m of Object.values(P[key].machines)) {
+          ctx.fillStyle = v.shops[key].owner === "player" ? "#2e8b57" : "#1565c0";
+          ctx.fillRect(mx(m.pos.x) - 3 * k, my(m.pos.z) - 3 * k, 6 * k, 6 * k);
+        }
+      }
     }
     ctx.fillStyle = "#3d3d3d";
     for (const a of this.flow.agents.values()) {
@@ -645,7 +718,7 @@ class Game {
       ctx.beginPath(); ctx.arc(mx(target.x), my(target.z), (6 + Math.sin(performance.now() / 250) * 1.5) * k, 0, Math.PI * 2); ctx.stroke();
     }
     // Player arrow (pointing where the figure looks) and the camera's view direction
-    const p = this.player.pos, f = this.player.facing;
+    const p = this.inCasino ? this.eggs.entryFront : this.player.pos, f = this.player.facing; // v8: underground = at the hatch
     ctx.save();
     ctx.translate(mx(p.x), my(p.z));
     ctx.scale(k, k);

@@ -1,9 +1,9 @@
 # AGENTS.md
 
 ## Project
-Nova Campus Tycoon v7, a 3D café management game: Three.js in the browser, rules in Python.
+Nova Campus Tycoon v8, a 3D café management game: Three.js in the browser, rules in Python.
 - Product brief: `docs/product-brief-v2.md` (v1: `docs/product-brief.md`)
-- Current task: the spec named in the prompt, for example `specs/v7-campus-expansion.md`
+- Current task: the spec named in the prompt, for example `specs/v8-fixes-and-easter-eggs.md`
 - Architecture: `docs/architecture.md`
 
 ## Commands
@@ -15,6 +15,8 @@ Nova Campus Tycoon v7, a 3D café management game: Three.js in the browser, rule
 - `app.py`: Streamlit page (UI only). Mounts the game, passes event batches to `bridge.py`, saves with `db.py`.
 - `bridge.py`: runs a batch of browser events through `logic.apply`.
 - `logic.py`: game state and all rules (no UI, no database code).
+- `mechanics.py`: one class per shop mechanic (vending, shelves, assembly, ...).
+- `easter_eggs.py`: v8 easter eggs (Jep, roulette), pure rules.
 - `students.py`, `timeclock.py`: student behaviour and decisions, clock, phases, lighting (pure rules).
 - `config.py`: all balancing values in one place.
 - `db.py`: SQLite storage. The database file is `data/game.db` (override with the env var `NCT_DB_PATH`).

@@ -200,7 +200,7 @@ class Player {
       this.pos.x += this.vel.x * dt / n; this.pos.z += this.vel.z * dt / n;
       resolveCollisions(this.pos, 0.35, this.game.world.colliders);
     }
-    this.pos.x = clamp(this.pos.x, -64, 64); this.pos.z = clamp(this.pos.z, -64, 120); // v7: the beach lies south
+    if (!this.game.inCasino) { this.pos.x = clamp(this.pos.x, -64, 64); this.pos.z = clamp(this.pos.z, -64, 120); } // v7: the beach lies south (v8: the casino lies outside)
     const stride = dist2(before, this.pos);
     const moving = Math.hypot(this.vel.x, this.vel.z) > 0.3;
     if (moving || faceCamera) {
@@ -312,7 +312,7 @@ class StaffAgent extends StudentAgent {
     const v = this.game.view;
     // v6: a newly hired manager already comes in for the cleaning on his first evening
     this.figure.visible = !!(v && this.game.screen === "game" && (v.shops[this.shop].auto ||
-      (this.shop === "cafe" && (v.shops.cafe.manager || (v.shops.cafe.manager_hired && v.day_state === "CLOSING")))));
+      (this.shop === "cafe" && v.shops.cafe.manager)));
     if (!this.figure.visible) return;
     while (this.steps.length && !this.path.length) {
       const s = this.steps[0];

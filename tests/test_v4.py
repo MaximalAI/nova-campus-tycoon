@@ -44,8 +44,10 @@ def test_sold_out_customer_who_leaves_costs_reputation():
     state = queue(opened(plan=False), items=("coffee",))  # no stock at all
     state, res = go(state, 8.2, type="at_counter", shop="cafe", student="s0")
     assert res["leaves"]
-    assert res["rep_delta"] == REP["sold_out_left"]
-    assert state["reputation"] == 50 + REP["sold_out_left"]
+    # v8: going to a competitor costs more than going home
+    want = REP["sold_out_to_competitor"] if res["decision"]["action"] == "shop" else REP["sold_out_left"]
+    assert res["rep_delta"] == want
+    assert state["reputation"] == 50 + want
     assert state["stats"]["shops"]["cafe"]["lost"] == 1
     assert state["stats"]["shops"]["cafe"]["sold_out"] == 1
 
@@ -254,7 +256,8 @@ def test_v3_save_gets_new_statistics_fields():
     assert s["sold_out"] == 0 and "cafe" in s["stock"]
 
 
-def test_sold_out_disappoints_each_student_only_once_a_day():
+def test_sold_out_costs_reputation_again_on_every_visit():
+    """v8 (team decision): replaces the v4 rule "only once per student and day"."""
     state = queue(opened(plan=False), items=("coffee",))
     state, _ = go(state, 8.2, type="at_counter", shop="cafe", student="s0")
     rep_after_first = state["reputation"]
@@ -262,8 +265,8 @@ def test_sold_out_disappoints_each_student_only_once_a_day():
     s["status"], s["intent"] = st.WALKING_TO_SHOP, {"shop": "cafe", "items": ["coffee"]}
     state, _ = go(state, 9.0, type="join_queue", student="s0", shop="cafe")
     state, res = go(state, 9.1, type="at_counter", shop="cafe", student="s0")
-    assert res["leaves"] and res["rep_delta"] == 0
-    assert state["reputation"] == rep_after_first
+    assert res["leaves"] and res["rep_delta"] < 0
+    assert state["reputation"] == rep_after_first + res["rep_delta"]
     assert state["stats"]["shops"]["cafe"]["lost"] == 2
 
 
@@ -285,3 +288,25 @@ def test_float_clock_just_below_the_mark_still_counts():
     assert state["closed"]
     state, res = go(state, 20.9999999, type="tick")
     assert state["day_state"] == logic.DAY_SUMMARY and "summary" in res
+
+
+def test_v8_every_customer_who_leaves_because_of_sold_out_costs_reputation():
+    state = opened(plan=False)
+    total = 0
+    for sid in ("s0", "s1", "s2"):
+        state = queue(state, sid=sid, items=("coffee",))
+        state, res = go(state, 8.2, type="at_counter", shop="cafe", student=sid)
+        assert res["leaves"] and res["rep_delta"] < 0  # not only once per day any more
+        total += res["rep_delta"]
+    assert state["reputation"] == 50 + total
+
+
+def test_v8_leaving_for_a_competitor_costs_more():
+    assert REP["sold_out_to_competitor"] < REP["sold_out_left"] < 0
+    state = opened(plan=False)
+    s = state["students"]["s0"]
+    s["utilities"] = {k: (400 if k.startswith("rival:") else 1) for k in s["utilities"]}
+    state = queue(state, items=("coffee",))
+    state, res = go(state, 8.2, type="at_counter", shop="cafe", student="s0")
+    assert res["decision"]["action"] == "shop" and res["decision"]["shop"] != "cafe"
+    assert res["rep_delta"] == REP["sold_out_to_competitor"]

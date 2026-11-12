@@ -55,11 +55,11 @@ def test_victory_needs_every_shop_and_every_manager():
     assert state["status"] == logic.VICTORY
 
 
-def test_balance_first_shop_around_day_ten_then_about_five_days_each():
+def test_balance_first_shop_and_the_days_between_purchases():
     """A short version of `uv run python simulation.py --campaign` (3 seeds)."""
     target = CONFIG["balance_target"]
     runs = [sim.simulate_campaign(seed, max_days=26) for seed in (1, 2, 3)]
     first = statistics.median(r["bought"].get("rival", 99) for r in runs)
     assert abs(first - target["first_purchase_day"]) <= 3, first
     second = statistics.median(r["bought"].get(logic.SHOP_ORDER[2], 99) for r in runs)
-    assert 2 <= second - first <= 9, (first, second)
+    assert 1 <= second - first <= 8, (first, second)
