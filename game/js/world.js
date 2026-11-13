@@ -67,7 +67,7 @@ function genericPoints(b, spec) {
 
 // Points used by gameplay (x, z)
 const P = {
-  spawn: { x: -24.5, z: 0 },
+  spawn: { x: -23.0, z: 3.6 }, // v11: a bit to the right, out of the way of managers leaving the café
   cafe: {
     doorOut: { x: -26.6, z: 0 }, doorIn: { x: -29.4, z: 0 },
     queue: [{ x: -33.9, z: 0 }, { x: -32.8, z: 0.15 }, { x: -31.7, z: -0.1 }, { x: -30.6, z: 0.1 }],
@@ -75,7 +75,7 @@ const P = {
     counterZone: { x0: -39.8, x1: -35.3, z0: -5.8, z1: 5.8 },
     cam: { x: -39.4, y: 4.6, z: 0, lx: -30, ly: 0.6, lz: 0 },
     staff: { x: -36.4, z: -0.6 },
-    register: { x: -35.8, z: -0.6 }, storage: { x: -38.6, z: 3.6 }, serve: { x: -36.4, z: 0 }, spawn: { x: -24.5, z: 0 },
+    register: { x: -35.8, z: -0.6 }, storage: { x: -38.6, z: 3.6 }, serve: { x: -36.4, z: 0 }, spawn: { x: -23.0, z: 3.6 },
     // customers leave along a side lane, so they do not walk through the queue behind them
     // v6: through the middle of the door (it is 3 m wide), not along the wall
     exit: [{ x: -34.0, z: 1.2 }, { x: -29.6, z: 1.0 }, { x: -28.0, z: 0.8 }, { x: -26.4, z: 0.9 }],
@@ -187,13 +187,16 @@ class World {
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), this.mat(0x6cbf4a));
     ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; s.add(ground);
     const pathMat = this.mat(0xe9dcc0);
+    this.pathRects = []; // v11: kept, so a check can make sure nothing stands on a path
     const path = (x0, x1, z0, z1) => {
+      this.pathRects.push({ x0, x1, z0, z1 });
       const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), pathMat);
       m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, 0.02, (z0 + z1) / 2); m.receiveShadow = true; s.add(m);
     };
-    path(-70, 70, -2.2, 2.2);
+    // v11: the main path runs from the café's door to the wholesaler's door; it no longer
+    // goes on under the buildings (two pieces used to stick out behind the café)
+    path(-28, 28, -2.2, 2.2);
     path(-2.2, 2.2, -16, 80);  // v7: down to the beach promenade
-    path(-70, -40, -8, -6.5);
     // v7: a path from the main paths to every new shop's door
     for (const key of this.newShops) {
       const pt = P[key], d = pt.frame;
@@ -224,8 +227,10 @@ class World {
     const trees = [[-18, 7.5], [-12, -12], [12, -12], [16.5, 12], [-48, 14], [-50, -16], [52, 16], [54, -18],
       [20, 26], [-22, 28], [8, 30], [-8, 24], [32, -20], [-30, -22], [40, 22], [-40, 24], [27, -32], [-16, -39]];
     for (const [x, z] of trees) this.tree(x, z);
-    for (const [x, z, r] of [[-8, 3.4, 0], [8, 3.4, 0], [4, 10.5, Math.PI / 2], [-4, 10.5, Math.PI / 2]]) this.bench(x, z, r);
+    // v11: every bench around the plaza faces the fountain
+    for (const [x, z] of [[-8, 3.4], [8, 3.4], [-5.8, 6.4], [5.8, 6.4], [-4.2, 10.6], [4.2, 10.6]]) this.bench(x, z, Math.atan2(0 - x, 6 - z));
     for (const [x, z] of [[-20, 3.2], [-8, -3.2], [8, -3.2], [20, 3.2], [3.2, -10], [3.2, 24], [-3.2, 30], [34, 11], [-34, 9]]) this.lamp(x, z);
+    this.buildDecor(); // v11
 
     // Objective marker (ring on the ground)
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.95, 40),
@@ -658,16 +663,16 @@ class World {
   // gate that stays closed until every campus shop is yours.
   buildBeach() {
     const s = this.scene, g = this.game;
-    const sand = new THREE.Mesh(new THREE.PlaneGeometry(150, 50), this.mat(0xf2d9a0));
+    const sand = new THREE.Mesh(new THREE.PlaneGeometry(400, 50), this.mat(0xf2d9a0)); // v11: over the full width
     sand.rotation.x = -Math.PI / 2; sand.position.set(0, 0.015, 101); sand.receiveShadow = true; s.add(sand);
     const sea = new THREE.Mesh(new THREE.PlaneGeometry(400, 120), new THREE.MeshLambertMaterial({ color: 0x2e86c1, emissive: 0x0b3d5c }));
     sea.rotation.x = -Math.PI / 2; sea.position.set(0, 0.03, 186); s.add(sea);
     for (let i = 0; i < 6; i++) { // a few lines of surf
-      const foam = new THREE.Mesh(new THREE.PlaneGeometry(150, 0.6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 }));
+      const foam = new THREE.Mesh(new THREE.PlaneGeometry(400, 0.6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 }));
       foam.rotation.x = -Math.PI / 2; foam.position.set(0, 0.04, 127 + i * 3.5); s.add(foam);
     }
     this.collide(-200, 200, 121.5, 123); // nobody walks into the sea
-    const promenade = new THREE.Mesh(new THREE.PlaneGeometry(120, 3.4), this.mat(0xd7ccc8));
+    const promenade = new THREE.Mesh(new THREE.PlaneGeometry(140, 3.4), this.mat(0xd7ccc8));
     promenade.rotation.x = -Math.PI / 2; promenade.position.set(0, 0.025, 81.5); promenade.receiveShadow = true; s.add(promenade);
     // umbrellas and towels on the sand
     const colors = [0xe63946, 0xffbe0b, 0x3a86ff, 0x2a9d8f, 0xff006e];
@@ -681,14 +686,14 @@ class World {
     for (const [x, z] of [[-50, 88], [-14, 89], [14, 89], [44, 89], [-56, 100], [58, 99]]) this.palm(x, z);
     // the fence between campus and beach, with a gate on the path
     const fenceZ = 74;
-    for (let x = -66; x <= 66; x += 3) {
+    for (let x = -99; x <= 99; x += 3) { // v11: the fence runs along the whole (wider) beach
       if (Math.abs(x) < 3) continue;
       this.box(0.15, 1.1, 0.15, 0x8d6e63, x, 0.55, fenceZ, { cast: false });
     }
-    this.box(63.5, 0.1, 0.08, 0x8d6e63, -34.25, 0.95, fenceZ, { cast: false });
-    this.box(63.5, 0.1, 0.08, 0x8d6e63, 34.25, 0.95, fenceZ, { cast: false });
-    this.collide(-66, -2.6, fenceZ - 0.2, fenceZ + 0.2);
-    this.collide(2.6, 66, fenceZ - 0.2, fenceZ + 0.2);
+    this.box(96.5, 0.1, 0.08, 0x8d6e63, -50.75, 0.95, fenceZ, { cast: false });
+    this.box(96.5, 0.1, 0.08, 0x8d6e63, 50.75, 0.95, fenceZ, { cast: false });
+    this.collide(-100, -2.6, fenceZ - 0.2, fenceZ + 0.2);
+    this.collide(2.6, 100, fenceZ - 0.2, fenceZ + 0.2);
     const gate = this.box(5.0, 1.2, 0.12, 0xc0392b, 0, 0.6, fenceZ);
     this.gates.beach = { x0: -2.6, x1: 2.6, z0: fenceZ - 0.2, z1: fenceZ + 0.2, active: true, mesh: gate };
     this.colliders.push(this.gates.beach);
@@ -720,6 +725,9 @@ class World {
     this.gates.beach.sign = sign;
     // forecast board on the promenade (P30)
     const board = this.board("SURF & SUN", 4.5, 79.6, Math.PI, "#00838f");
+    // v11: the board stands on two posts instead of floating in the air
+    for (const dx of [-0.75, 0.75]) this.box(0.1, 1.05, 0.1, 0x5d4037, 4.5 + dx, 0.52, 79.6);
+    this.collide(3.6, 5.4, 79.4, 79.8);
     this.addInteractable({ id: "forecast_board", pos: { x: 4.5, z: 81.0 }, radius: 2.2, meshes: [board], label: () => "Beach forecast",
       enabled: () => this.zoneVisible("beach"), action: () => g.flow.openForecast() });
     for (const [x, z] of [[-30, 83.6], [-10, 83.6], [10, 83.6], [30, 83.6]]) this.lamp(x, z);
@@ -1110,6 +1118,107 @@ class World {
     }
   }
 
+  // v11: more life on the campus and the beach: tables with chairs, more trees, bins,
+  // bike racks, flower beds; on the sand loungers, a lifeguard tower and a volleyball net.
+  // Nothing stands on a path, in front of a door or where the vending machines are.
+  buildDecor() {
+    const terraces = [[-25.5, 9.8, 0xe76f51], [-32, 11.2, 0x2a9d8f], [-24.5, -12.5, 0xf4a261], [-31.5, -12.5, 0x457b9d],
+      [25, -12.5, 0xe9c46a], [9.4, -8.6, 0x2a9d8f], [-6.8, 20.4, 0xe76f51], [19.5, 17.5, 0x6a4c93], [22.5, 7.6, 0x52796f]];
+    for (const [x, z, c] of terraces) this.seating(x, z, c);
+    for (const [x, z, c] of [[-13.5, 86.8, 0xff006e], [13.5, 86.8, 0x3a86ff], [-21, 86.8, 0xffbe0b], [19, 84.6, 0x2a9d8f]]) this.seating(x, z, c);
+    const more = [[-46, -28], [-56, 28], [46, -30], [58, 30], [-34, 36], [30, 38], [-10, 44], [14, 46], [44, 44], [-46, 46],
+      [-60, -44], [60, -44], [0, -44], [-36, -44], [36, -46], [-60, 56], [58, 60], [-24, 58], [22, 60], [44, -60], [-46, -60]];
+    for (const [x, z] of more) this.tree(x, z);
+    for (const [x, z] of [[-10.2, 3.6], [10.2, 3.6], [-24, 6.6], [7.4, -15.2], [-15.6, -16.8], [21, -16.8], [5, 14.4], [24.5, 4.2]]) this.bin(x, z);
+    this.bikeRack(-24.5, -4.6, 0); this.bikeRack(-10.6, -16.5, 0); this.bikeRack(10.6, 9.4, Math.PI / 2);
+    for (const [x, z, w, d, c] of [[-10, -4.4, 7, 1.2, 0xe63946], [10, -4.4, 6, 1.2, 0xffbe0b], [-14, 4.6, 6, 1.2, 0x9b5de5], [-7, -10, 1.2, 6, 0xf15bb5]]) this.flowerBed(x, z, w, d, c);
+    // beach
+    for (const [x, z, r] of [[8, 104, 0.2], [10.5, 104, 0.2], [-30, 106, -0.2], [-27.5, 106, -0.2], [34, 102, 0.1], [56, 106, 0], [-54, 106, 0]]) this.lounger(x, z, r);
+    this.lifeguardTower(46, 101);
+    this.volleyNet(-14, 102.5);
+  }
+
+  seating(x, z, color) {
+    const s = this.scene;
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 0.07, 18), this.mat(0xf5f0e6));
+    top.position.set(x, 0.75, z); top.castShadow = true; s.add(top);
+    this.box(0.08, 0.72, 0.08, 0x3a3a3a, x, 0.36, z);
+    this.box(0.5, 0.04, 0.5, 0x3a3a3a, x, 0.02, z, { cast: false });
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2, cx = x + Math.sin(a) * 0.95, cz = z + Math.cos(a) * 0.95;
+      const seat = this.box(0.44, 0.06, 0.44, color, cx, 0.45, cz); seat.rotation.y = a;
+      const back = this.box(0.44, 0.45, 0.05, color, cx + Math.sin(a) * 0.2, 0.7, cz + Math.cos(a) * 0.2); back.rotation.y = a;
+      for (const [lx, lz] of [[-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18], [0.18, 0.18]]) {
+        const ox = lx * Math.cos(a) + lz * Math.sin(a), oz = -lx * Math.sin(a) + lz * Math.cos(a);
+        this.box(0.04, 0.42, 0.04, 0x3a3a3a, cx + ox, 0.21, cz + oz, { cast: false });
+      }
+    }
+    // a parasol over the table
+    this.box(0.05, 2.3, 0.05, 0xeeeeee, x, 1.15, z, { cast: false });
+    const shade = new THREE.Mesh(new THREE.ConeGeometry(1.45, 0.45, 12), this.mat(color, { flatShading: true }));
+    shade.position.set(x, 2.35, z); shade.castShadow = true; s.add(shade);
+    this.collide(x - 1.25, x + 1.25, z - 1.25, z + 1.25);
+  }
+
+  bin(x, z) {
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.24, 0.8, 12), this.mat(0x2d6a4f));
+    b.position.set(x, 0.4, z); b.castShadow = true; this.scene.add(b);
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.06, 12), this.mat(0x1b4332));
+    lid.position.set(x, 0.83, z); this.scene.add(lid);
+    this.collide(x - 0.3, x + 0.3, z - 0.3, z + 0.3);
+  }
+
+  bikeRack(x, z, r) {
+    const along = Math.abs(Math.sin(r)) > 0.5; // rack runs along z
+    for (let i = -2; i <= 2; i++) {
+      const px = along ? x : x + i * 0.55, pz = along ? z + i * 0.55 : z;
+      const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.03, 6, 14, Math.PI), this.mat(0x9e9e9e));
+      hoop.position.set(px, 0.02, pz); hoop.rotation.y = along ? 0 : Math.PI / 2; this.scene.add(hoop);
+    }
+    this.box(along ? 0.06 : 2.6, 0.04, along ? 2.6 : 0.06, 0x9e9e9e, x, 0.02, z, { cast: false });
+    if (along) this.collide(x - 0.4, x + 0.4, z - 1.4, z + 1.4); else this.collide(x - 1.4, x + 1.4, z - 0.4, z + 0.4);
+  }
+
+  flowerBed(x, z, w, d, color) {
+    this.box(w, 0.3, d, 0x8d6e63, x, 0.15, z);
+    this.box(w - 0.2, 0.06, d - 0.2, 0x4e342e, x, 0.31, z, { cast: false });
+    const n = Math.max(3, Math.round(Math.max(w, d) / 0.7));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n - 0.5;
+      const fx = w > d ? x + t * (w - 0.6) : x + ((i % 2) - 0.5) * 0.4, fz = w > d ? z + ((i % 2) - 0.5) * 0.4 : z + t * (d - 0.6);
+      const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.2, 0), this.mat(i % 3 ? color : 0x2f7d32, { flatShading: true }));
+      f.position.set(fx, 0.5, fz); this.scene.add(f);
+    }
+    this.collide(x - w / 2, x + w / 2, z - d / 2, z + d / 2);
+  }
+
+  lounger(x, z, r) {
+    const m = this.box(0.7, 0.1, 1.9, 0xffffff, x, 0.32, z); m.rotation.y = r;
+    const back = this.box(0.7, 0.08, 0.7, 0xffffff, x + Math.sin(r) * 0.85, 0.55, z + Math.cos(r) * 0.85);
+    back.rotation.set(-0.6, r, 0, "YXZ");
+    this.box(0.62, 0.04, 1.7, 0x3a86ff, x, 0.39, z, { cast: false }).rotation.y = r;
+    this.collide(x - 0.5, x + 0.5, z - 1.0, z + 1.0);
+  }
+
+  lifeguardTower(x, z) {
+    for (const [dx, dz] of [[-0.8, -0.8], [0.8, -0.8], [-0.8, 0.8], [0.8, 0.8]]) this.box(0.14, 2.4, 0.14, 0xffffff, x + dx, 1.2, z + dz);
+    this.box(2.0, 0.12, 2.0, 0xd62828, x, 2.45, z);
+    this.box(2.0, 0.9, 0.08, 0xd62828, x, 2.95, z + 1.0);
+    this.box(0.08, 0.9, 2.0, 0xd62828, x - 1.0, 2.95, z); this.box(0.08, 0.9, 2.0, 0xd62828, x + 1.0, 2.95, z);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(1.6, 0.7, 4), this.mat(0xffffff, { flatShading: true }));
+    roof.position.set(x, 3.9, z); roof.rotation.y = Math.PI / 4; roof.castShadow = true; this.scene.add(roof);
+    this.box(0.9, 0.06, 2.4, 0x8d6e63, x, 1.2, z - 1.9, { cast: false }).rotation.x = 0.9;
+    this.collide(x - 1.0, x + 1.0, z - 1.0, z + 1.0);
+  }
+
+  volleyNet(x, z) {
+    for (const dx of [-3.2, 3.2]) { this.box(0.1, 2.5, 0.1, 0xeeeeee, x + dx, 1.25, z); this.collide(x + dx - 0.15, x + dx + 0.15, z - 0.15, z + 0.15); }
+    const net = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 0.9), new THREE.MeshBasicMaterial({ color: 0x222222, transparent: true, opacity: 0.45, side: THREE.DoubleSide }));
+    net.position.set(x, 2.0, z); this.scene.add(net);
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), this.mat(0xffffff));
+    ball.position.set(x + 1.4, 0.16, z + 2.2); this.scene.add(ball);
+  }
+
   tree(x, z) {
     this.box(0.4, 1.6, 0.4, 0x7a5230, x, 0.8, z);
     const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(1.6, 0), this.mat(0x2f7d32, { flatShading: true }));
@@ -1164,6 +1273,9 @@ class World {
     for (const c of this.colliders) {
       if (c.x1 - c.x0 < 2 && c.z1 - c.z0 < 2 && x > c.x0 - pad && x < c.x1 + pad && z > c.z0 - pad && z < c.z1 + pad) return true;
     }
+    // v11: the beach fence is long and thin, so the check above missed it: managers walked
+    // through it. Only the gate in the middle is open.
+    if (z > 73.8 - pad && z < 74.2 + pad && Math.abs(x) > 2.6 - pad) return true;
     return x > -1.7 - pad && x < 1.7 + pad && z > 4.3 - pad && z < 7.7 + pad; // fountain
   }
 

@@ -45,7 +45,8 @@ class Bridge {
   }
   send(type, payload = {}, onResult = null) {
     const cid = ++this.cid;
-    const ev = Object.assign({ type, cid, t: this.game.clock ? this.game.clock.t : 5 }, payload);
+    // v11: with the day, so Python can tell an event of yesterday from one of today
+    const ev = Object.assign({ type, cid, t: this.game.clock ? this.game.clock.t : 5, day: this.game.view ? this.game.view.day : undefined }, payload);
     if (onResult) this.callbacks.set(cid, onResult);
     this.outbox.push(ev);
     this.flush();

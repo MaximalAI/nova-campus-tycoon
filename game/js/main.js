@@ -315,6 +315,7 @@ class Game {
     window.addEventListener("blur", () => { for (const k in this.input) this.input[k] = false; });
     // v5: leaving the browser tab pauses the game
     document.addEventListener("visibilitychange", () => {
+      this.sound.setHidden(document.hidden); // v11: no music while the tab is in the background
       if (document.hidden && this.screen === "game" && this.view && this.view.status === "running") {
         this.autoPause();
         this.autosave(); // v8: save right away when the tab is hidden (laptop closed, app switched)
@@ -639,7 +640,7 @@ class Game {
     const now = performance.now();
     // v6: a walker that hardly moved for a second is stuck in a group: it may pass through
     // the others for 2.5 s (ghost), so groups never block each other for good.
-    for (const a of this.flow.agents.values()) {
+    for (const a of [...this.flow.agents.values(), ...Object.values(this.workers)]) { // v11: managers too
       if (!a.figure.visible || !a.path.length) { a.stuckSince = null; continue; }
       if (!a.lastCheck || now - a.lastCheck.t > 1000) {
         if (a.lastCheck && dist2(a.pos, a.lastCheck) < 0.04 && this.clock.running) a.ghostUntil = now + 2500;
@@ -655,9 +656,18 @@ class Game {
         const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
         const d = Math.hypot(dx, dz);
         if (d >= R || d < 1e-4) continue;
-        const push = (R - d) / 2, nx = dx / d, nz = dz / d;
+        const push = (R - d) / 2;
+        let nx = dx / d, nz = dz / d;
         // somebody standing in the queue or at work stays put; the one walking steps aside
-        const aFix = a.anchored && a.anchored(), bFix = b.anchored && b.anchored();
+        // v11: two managers do not walk through each other any more: the one walking steps
+        // aside of the one standing, two walking ones both give way (a stuck one goes ghost)
+        const staffPair = a instanceof StaffAgent && b instanceof StaffAgent;
+        if (a.ghostUntil > now || b.ghostUntil > now) continue; // stuck for a second: may pass (last resort)
+        if (staffPair && (a.path.length || b.path.length)) { // v11: managers slide past each other sideways (no head-on deadlock)
+          const sx = nx - nz * 0.6, sz = nz + nx * 0.6, l = Math.hypot(sx, sz); nx = sx / l; nz = sz / l;
+        }
+        const aFix = staffPair ? !a.path.length : a.anchored && a.anchored(), bFix = staffPair ? !b.path.length : b.anchored && b.anchored();
+        if (staffPair && aFix && bFix) continue; // both at their spots (spots are apart)
         const wa = aFix ? 0 : bFix ? 1 : 0.5, wb = bFix ? 0 : aFix ? 1 : 0.5;
         a.pos.x -= nx * push * 2 * wa; a.pos.z -= nz * push * 2 * wa;
         b.pos.x += nx * push * 2 * wb; b.pos.z += nz * push * 2 * wb;
@@ -684,11 +694,12 @@ class Game {
     ctx.fillStyle = "#79c25a"; ctx.fillRect(0, 0, S, S);
     const path = (x0, x1, z0, z1) => ctx.fillRect(mx(x0), my(z0), mx(x1) - mx(x0), my(z1) - my(z0));
     // v7: beach and sea (greyed out while the beach is closed)
-    ctx.fillStyle = "#f2d9a0"; path(-75, 75, 76, 122);
+    ctx.fillStyle = "#f2d9a0"; path(-200, 200, 76, 122); // v11: over the full width
     ctx.fillStyle = "#2e86c1"; path(-200, 200, 122, 260);
-    ctx.fillStyle = "#8d6e63"; path(-66, 66, 73.8, 74.2);
+    ctx.fillStyle = "#8d6e63"; path(-100, 100, 73.8, 74.2);
     ctx.fillStyle = "#efe3c8";
-    path(-80, 80, -2.2, 2.2); path(-2.2, 2.2, -16, 80); path(-60, 60, 79.8, 83.2);
+    path(-28, 28, -2.2, 2.2); // v11: from the café to the wholesaler
+    path(-2.2, 2.2, -16, 80); path(-60, 60, 79.8, 83.2);
     ctx.beginPath(); ctx.arc(mx(0), my(6), 8 / (2 * R) * S, 0, Math.PI * 2); ctx.fill();
     const v = this.view;
     for (const [key, b] of Object.entries(BUILDINGS)) {

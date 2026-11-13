@@ -85,6 +85,6 @@ Two secrets are hidden on the campus. We do not spoil where; `specs/v8-fixes-and
 
 ## Documents
 - Product brief v2 (source of truth): `docs/product-brief-v2.md`
-- Task specs: `specs/v10-shop-logic.md` (current), `specs/v9-fixes-and-casino.md`, `specs/v8-fixes-and-easter-eggs.md`, `specs/v7-campus-expansion.md`, `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
+- Task specs: `specs/v11-managers-map-and-summary.md` (current), `specs/v10-shop-logic.md`, `specs/v9-fixes-and-casino.md`, `specs/v8-fixes-and-easter-eggs.md`, `specs/v7-campus-expansion.md`, `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
 - Architecture: `docs/architecture.md`, assumptions: `docs/assumptions.md`
 - Rules for coding agents: `AGENTS.md` (Claude Code reads `CLAUDE.md`, which imports it)

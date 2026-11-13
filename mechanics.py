@@ -257,6 +257,37 @@ class Vending(Mechanic):
 
     def start_day(self, state: dict) -> None:
         self.data(state)["last_hour"] = int(CONFIG["time"]["open"])
+        self.data(state)["round_at"] = None  # v11: the manager has not been round the machines today
+
+    # v11: the manager walks from machine to machine (the browser sends one event per machine).
+    # The rounds below only run in Python if no round came from the browser for a while
+    # (headless simulation, or the tab was closed).
+    FALLBACK_HOURS = 2.0
+
+    def service_machine(self, state: dict, machine: str) -> dict:
+        """v11: the manager at one machine: repairs it, refills it and takes the cash out."""
+        import logic
+
+        if machine not in self.machine_ids():
+            raise logic.GameError("Unknown machine.")
+        m = self.machines(state)[machine]
+        done = {"repaired": False, "moved": {}, "cash": 0}
+        if m["broken"] and state["money"] >= self.p["repair_cost"]:
+            self.repair(state, machine)
+            done["repaired"] = True
+        if not state["closed"]:
+            done["moved"] = self.refill(state, machine)
+        done["cash"] = self.collect(state, machine)
+        state["money"] += done["cash"]
+        self.data(state)["round_at"] = state["time"]
+        return done
+
+    def round_due(self, state: dict) -> bool:
+        """v11: the Python fallback round is due: half an hour after opening, then every two hours without a round."""
+        at = self.data(state).get("round_at")
+        if at is None:
+            return state["time"] + 1e-6 >= CONFIG["time"]["open"] + 0.5
+        return state["time"] - at >= self.FALLBACK_HOURS
 
     def tick(self, state: dict) -> list[str]:
         """Breakdowns: one roll per machine for every full opening hour that passed."""
@@ -273,19 +304,17 @@ class Vending(Mechanic):
                     m["broken"] = True
                     toasts.append(f"Machine broken: {names[mid]}")
         d["last_hour"] = max(last, now)
-        if state["shops"][self.shop]["manager"]:
-            for mid, m in self.machines(state).items():
-                if m["broken"] and state["money"] >= self.p["repair_cost"]:
-                    self.repair(state, mid)
-                    toasts.append(f"Manager repaired the machine {names[mid]}")
-        return toasts
+        return toasts  # v11: the manager repairs on his rounds (service), not by magic
 
     def manager_fill(self, state: dict) -> None:
-        """A working manager refills every machine and brings the cash to the office."""
-        if not state["shops"][self.shop]["manager"] or state["closed"]:
+        """A working manager refills every machine and brings the cash to the office.
+
+        v11: in the game he walks round the machines (event manager_service). This is only
+        the fallback when no round came for two hours (or none since opening)."""
+        if not state["shops"][self.shop]["manager"] or state["closed"] or not self.round_due(state):
             return
-        self.refill(state, None)
-        state["money"] += self.collect(state, None)
+        for mid in self.machine_ids():
+            self.service_machine(state, mid)
 
     def end_day(self, state: dict) -> int:
         if state["shops"][self.shop]["manager"]:

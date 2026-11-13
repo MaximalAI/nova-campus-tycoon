@@ -139,3 +139,15 @@ Decisions that the brief left open or that came up during implementation. Change
 - SnackBots manager: plans capacity x machines per product; refilling shares the goods out evenly (emptiest machine first).
 - Mercado & Go: shelves can be filled until closing; the fill_until value is 20:00. A partly sold-out order costs 1 reputation point (inside the daily sold-out cap of 15).
 - Managers wait outside the wholesaler while the player is inside (only shown in the browser; the purchase happens in Python when the proposal is accepted).
+
+## v11 changes
+- "Start the day" waits for every manager who is on (or about to start) his wholesaler walk. The purchase itself still happens in Python when the proposal is accepted; the walk is shown in the browser.
+- Managers avoid each other in the browser only (a walking one gives way); this has no rule effect.
+- SnackBots manager rounds: one `manager_service` event per machine (repair if the money is there, refill from the storage while open, take the cash into the balance). Browser rounds about every 90 game minutes, at once after a breakdown. Python fallback: half an hour after opening, then every two hours without a round. The evening cash is collected on the last round or at the end of the day.
+- Reusable rental items last 40 rentals (`lifetime_uses`). Their cost per rental is used in the price dialog and by managers; the purchase price is still paid once when buying.
+- Shops with their own opening hours (Praia Bar) can be priced until they open.
+- Missed cleaning: -15 reputation per shop that was the player's job (v10: -5).
+- Investments (shops, upgrades, managers) are kept in `stats.investments`, shown in the summary and not taken off the day profit. `spending` now only holds running costs (machine repairs).
+- Market share: your sales / (your sales + bot shops in open zones).
+- The beach fence blocks the walking grid except at the gate (thin colliders used to be ignored by the grid).
+- The browser stamps every event with its day. An event of the previous day that arrives after "next_day" (for example an autosave sent at 21:00 while the new day loads) is still applied but does not move the clock; before, it could set the new morning to 21:00 and end the new day at its first tick.

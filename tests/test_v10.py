@@ -115,6 +115,7 @@ def test_the_vending_manager_plans_enough_for_every_machine():
 def test_the_vending_manager_fills_all_machines_evenly():
     state = owning("cafe", "snackbots", managers=["cafe", "snackbots"])
     state, _ = go(state, t=CONFIG["time"]["manager_buys_at"], type="tick")
+    state, _ = go(state, t=CONFIG["time"]["open"] + 0.5, type="tick")  # v11: the fallback round (no browser here)
     machines = mechanics.of("snackbots").machines(state)
     for product in CONFIG["shops"]["snackbots"]["products"]:
         counts = [m["stock"].get(product, 0) for m in machines.values()]

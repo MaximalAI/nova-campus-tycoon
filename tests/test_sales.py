@@ -167,7 +167,7 @@ def test_missed_cleaning_costs_reputation():
     state, _ = go(open_game(), 20.0, type="tick")
     state, _ = go(state, 21.0, type="tick")
     assert state["day_state"] == logic.DAY_SUMMARY
-    assert state["reputation"] == 45
+    assert state["reputation"] == 50 + CONFIG["reputation"]["cleaning_missed"]  # v11: -15
 
 
 def test_summary_numbers_add_up():

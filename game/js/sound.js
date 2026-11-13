@@ -51,6 +51,13 @@ class Sound {
     if (this.ctx) this.sfxGain.gain.setTargetAtTime(on ? 0.32 : 0, this.ctx.currentTime, 0.05);
     if (on) this.play("click");
   }
+  // v11: leaving the browser tab silences everything, coming back resumes it
+  setHidden(hidden) {
+    if (!this.ctx) return;
+    if (hidden) this.ctx.suspend().catch(() => {});
+    else this.ctx.resume().catch(() => {});
+  }
+
   setMood(mood) {
     if (this.mood === mood) return;
     this.mood = mood;

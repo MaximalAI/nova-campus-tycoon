@@ -60,7 +60,8 @@ def _empty_stats() -> dict:
         "shops": {s: {"revenue": 0, "sold": {}, "served": 0, "lost": 0, "wrong": 0,
                       "sold_out": 0, "rejected": 0, "tips": 0, "sold_out_products": {}} for s in SHOPS},
         "purchase_cost": 0,
-        "spending": 0,
+        "spending": 0,  # running costs (repairs)
+        "investments": 0,  # v11: shops bought, upgrades, managers hired - not part of the day's profit
         "rival_revenue": 0,
         "wasted": 0,
         "jep": 0,  # v8: spent at Jep
@@ -315,8 +316,12 @@ def manager_proposal(state: dict, shop: str) -> dict:
 
 
 def unit_cost(product: str) -> float:
-    """Ingredient cost of one portion in cents."""
-    return sum(q * ITEMS[i]["price"] / ITEMS[i]["base_units"] for i, q in PRODUCTS[product]["uses"].items())
+    """Ingredient cost of one portion in cents.
+
+    v11: a reusable item (surfboard, wetsuit) is not used up: one rental costs its price
+    spread over the rentals it lasts (lifetime_uses), not the whole board."""
+    return sum(q * ITEMS[i]["price"] / ITEMS[i]["base_units"] / ITEMS[i].get("lifetime_uses", 1)
+               for i, q in PRODUCTS[product]["uses"].items())
 
 
 def _manager_buys(state: dict, shop: str, plan: dict | None = None, prices: dict | None = None) -> dict:
@@ -729,7 +734,9 @@ def _ev_stock_goods(state, ev):
 def _ev_set_prices(state, ev):
     shop = ev.get("shop", "cafe")
     _require_owned(state, shop)
-    if state["open"] or state["closed"]:
+    # v11: a shop that opens later (Praia Bar at sunset) can be priced until it opens
+    opens_later = bool(SHOPS[shop].get("open_hours")) and state["time"] < SHOPS[shop]["open_hours"][0] - 1e-6
+    if state["closed"] or (state["open"] and not opens_later):
         raise GameError("You can only change prices before opening.")
     prices = ev.get("prices") or {}
     _check_prices(shop, prices)
@@ -853,6 +860,7 @@ def _end_day(state) -> dict:
         "revenue": revenue,
         "purchase_cost": stats["purchase_cost"],
         "spending": stats["spending"],
+        "investments": stats.get("investments", 0),  # v11: shown, but not taken off the profit
         "jep": stats.get("jep", 0),
         "casino": stats.get("casino", 0),
         "bar": stats.get("bar", 0),
@@ -860,7 +868,9 @@ def _end_day(state) -> dict:
         "spoiled": spoiled,
         "profit": profit,
         "sold": sold,
-        "plan": dict(state["plan"]),
+        # v11: the plan of every shop (managers' proposals too), so "sold vs. plan" is never 0
+        "plan": _sum_plans(day_plan_by_shop(state)),
+        "market_zones": market_zones(state),
         "served": sum(stats["shops"][s]["served"] for s in owned_shops(state)),
         "lost": sum(stats["shops"][s]["lost"] for s in owned_shops(state)),
         "wrong": sum(stats["shops"][s]["wrong"] for s in owned_shops(state)),
@@ -879,6 +889,7 @@ def _end_day(state) -> dict:
         "by_shop": {s: {"sold": dict(stats["shops"][s]["sold"]), "served": stats["shops"][s]["served"],
                         "lost": stats["shops"][s]["lost"], "revenue": stats["shops"][s]["revenue"],
                         "sold_out_products": dict(stats["shops"][s].get("sold_out_products", {})),
+                        "plan": day_plan_by_shop(state).get(s, {}),
                         "manager": state["shops"][s]["manager"]}
                     for s in SHOP_ORDER},
     }
@@ -891,6 +902,14 @@ def _end_day(state) -> dict:
     if state["money"] <= 0:
         state["status"] = GAME_OVER
     return {"summary": summary}
+
+
+def _sum_plans(plans: dict) -> dict:
+    total: dict[str, int] = {}
+    for plan in plans.values():
+        for p, n in plan.items():
+            total[p] = total.get(p, 0) + n
+    return total
 
 
 def _stock_report(state: dict) -> dict:
@@ -909,8 +928,28 @@ def _stock_report(state: dict) -> dict:
 
 
 def _bot_revenue(state: dict) -> int:
-    """What the shops you do not own sold today."""
-    return sum(state["stats"]["shops"][s]["revenue"] for s in SHOPS if state["shops"][s]["owner"] == "bot")
+    """What the shops you do not own sold today (v11: only in the zones that are open, so the
+    market share is the campus market until the beach opens, then campus and beach)."""
+    return sum(state["stats"]["shops"][s]["revenue"] for s in SHOPS
+               if state["shops"][s]["owner"] == "bot" and zone_open(state, SHOPS[s]["zone"]))
+
+
+def market_zones(state: dict) -> list[str]:
+    """v11: the zones the market share counts (campus, and the beach once it is open)."""
+    return [z for z in CONFIG["zones"] if zone_open(state, z)]
+
+
+def day_plan_by_shop(state: dict) -> dict:
+    """v11: the plan of every shop you run today: your own plan in the shop you work in,
+    the manager's (accepted) proposal in a shop with a manager."""
+    plans = {}
+    proposals = state.get("manager_proposals", {})
+    for s in owned_shops(state):
+        if state["shops"][s]["manager"] and s in proposals:
+            plans[s] = dict(proposals[s].get("plan", {}))
+        elif s == work_shop(state):
+            plans[s] = dict(state["plan"])
+    return plans
 
 
 def _competitors_overview(state: dict) -> list[dict]:
@@ -1022,7 +1061,7 @@ def _ev_buy_upgrade(state, ev):
     cost = catalogue[upgrade]["cost"]
     _pay(state, cost)
     state["shops"][shop]["upgrades"].append(upgrade)
-    state["stats"]["spending"] += cost
+    state["stats"]["investments"] = state["stats"].get("investments", 0) + cost  # v11
     return {"toast": f"{catalogue[upgrade]['name']} bought"}
 
 
@@ -1034,7 +1073,7 @@ def _ev_hire_manager(state, ev):
     cost = manager_cost(shop)
     _pay(state, cost)
     state["shops"][shop]["manager_hired"] = True  # v5: starts tomorrow morning
-    state["stats"]["spending"] += cost
+    state["stats"]["investments"] = state["stats"].get("investments", 0) + cost  # v11
     _check_victory(state)
     return {"toast": "Manager hired - he starts tomorrow morning"}
 
@@ -1098,7 +1137,7 @@ def _ev_buy_shop(state, ev):
     # the old owner keeps running it. Then the staff leaves and you run it yourself
     # until you hire a manager there too.
     state["shops"][shop]["sold"] = True
-    state["stats"]["spending"] += cost
+    state["stats"]["investments"] = state["stats"].get("investments", 0) + cost  # v11
     return {"toast": f"Contract signed! {SHOPS[shop]['name']} becomes yours tomorrow morning - you will work there yourself.",
             "bought": shop}
 
@@ -1561,6 +1600,30 @@ def _ev_assemble(state, ev):
             "product": product, "tray": list(state["tray"])}
 
 
+def _ev_manager_service(state, ev):
+    """v11: the vending manager reached a machine on his round: repair, refill, take the cash."""
+    shop, machine = ev.get("shop"), ev.get("machine")
+    _require_owned(state, shop)
+    mech = mechanics.of(shop)
+    if not hasattr(mech, "service_machine"):
+        raise GameError("There are no machines here.")
+    if not state["shops"][shop]["manager"]:
+        raise GameError("This shop has no manager.")
+    done = mech.service_machine(state, machine)
+    name = next(m["name"] for m in mech.p["machines"] if m["id"] == machine)
+    parts = []
+    if done["repaired"]:
+        parts.append("repaired")
+    if done["moved"]:
+        parts.append(f"refilled {sum(done['moved'].values())}")
+    if done["cash"]:
+        parts.append(f"collected {euro(done['cash'])}")
+    result = dict(done, amount=done["cash"])
+    if parts:
+        result["toast"] = f"Manager at {name}: " + ", ".join(parts)
+    return result
+
+
 def _ev_set_happy_hour(state, ev):
     """Praia Bar: choose the happy hour discount (P32)."""
     shop = ev.get("shop")
@@ -1713,6 +1776,7 @@ HANDLERS = {
     "assemble": _ev_assemble,
     "set_happy_hour": _ev_set_happy_hour,
     "refill_machine": _ev_refill_machine,
+    "manager_service": _ev_manager_service,  # v11
     "autosave": _ev_autosave,
     "collect_cash": _ev_collect_cash,
     "deposit_cash": _ev_deposit_cash,
@@ -1736,7 +1800,11 @@ def apply(state: dict, event: dict, inplace: bool = False) -> tuple[dict, dict]:
     if state["status"] != RUNNING and not (kind == "continue_open_mode" and state["status"] == VICTORY):
         raise GameError("The game is over.")
     new = state if inplace else copy.deepcopy(state)
-    if "t" in event:
+    # v11: the browser stamps each event with its day. An event of yesterday that arrives after
+    # "next_day" (an autosave sent at 21:00 while the new day was loading) keeps its effect
+    # but must not move the new morning to 21:00 (that ended the new day at its first tick).
+    stale = kind != "next_day" and "day" in event and event["day"] != new["day"]
+    if "t" in event and not stale:
         t = float(event["t"])
         if t < new["time"] - 1e-6 and kind != "next_day":
             t = new["time"]  # time never runs backwards
@@ -1849,8 +1917,9 @@ def view(state: dict) -> dict:
         "history": state["history"][-7:],
         # small numbers per day for the charts (all days)
         "chart": [{k: h.get(k) for k in ("day", "revenue", "tips", "profit", "served", "lost", "reputation",
-                                         "market_share", "money")} |
+                                         "market_share", "money", "investments", "market_zones")} |
                   {"competitor_revenue": (h.get("competitor") or {}).get("revenue")} for h in state["history"]],
+        "market_zones": market_zones(state),  # v11
         "today": _today(state),
         "work_shop": work_shop(state),
         "manager_proposals": state.get("manager_proposals", {}),
@@ -1908,6 +1977,7 @@ def _today(state: dict) -> dict:
     market = revenue + _bot_revenue(state)
     return {
         "revenue": revenue, "tips": tips, "purchase_cost": stats["purchase_cost"], "spending": stats["spending"],
+        "investments": stats.get("investments", 0),
         "jep": stats.get("jep", 0), "casino": stats.get("casino", 0), "bar": stats.get("bar", 0),
         "gain": gain,
         "served": sum(stats["shops"][s]["served"] for s in shops),

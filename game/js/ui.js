@@ -65,8 +65,20 @@ class UI {
     }
     this.updateStock(v);
     this.updateShopPanel(v);
+    // v11: a primary button whose state depends on choices in the dialog follows them
+    // (Bowl Bar: "Assemble" turns green as soon as an ingredient is picked)
+    const cur = this.current;
+    if (cur && cur.primary && typeof cur.primary.disabled === "function" && this.primaryButton) {
+      const off = !!cur.busy || !!cur.primary.disabled();
+      if (this.primaryButton.disabled !== off) this.primaryButton.disabled = off;
+    }
     const skip = g.flow.canSkipToOpening();
     this.$("#skip-btn").classList.toggle("hidden", !skip);
+    // v11: greyed out while managers are still on their way to or from the wholesaler
+    const ready = skip && g.flow.canStartDay();
+    this.$("#skip-btn").classList.toggle("waiting", skip && !ready);
+    const tip = ready ? "Jump to 08:00 and open the café" : "Your managers are still at the wholesaler";
+    if (this.$("#skip-btn").title !== tip) this.$("#skip-btn").title = tip;
     this.$("#objective").textContent = g.flow.objectiveText();
     this.placeObjective();
     this.root.querySelectorAll(".speed").forEach((b) => b.classList.toggle("active", Number(b.dataset.speed) === g.clock.speed));

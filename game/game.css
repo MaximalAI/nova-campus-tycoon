@@ -135,12 +135,14 @@
 .warn { color: var(--red); font-weight: 800; }
 .note { font-size: 13px; color: #7a6650; margin-top: 6px; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
-.chip { background: #fff; border-radius: 12px; padding: 6px 10px; font-weight: 800; border: 2px solid #eadfcc; }
+.chip { background: #fff; color: var(--ink); border-radius: 12px; padding: 6px 10px; font-weight: 800; border: 2px solid #eadfcc; }
 .chip.off { opacity: .4; text-decoration: line-through; }
 .chip.ok { border-color: var(--green); }
 .chip.miss { border-color: var(--red); }
-.bars { display: flex; gap: 8px; align-items: flex-end; height: 90px; margin: 8px 0; }
-.bars .bar { flex: 1; text-align: center; font-size: 12px; font-weight: 800; }
+/* v11: grows with its labels (they used to run into the text below) and wraps with many products */
+.bars { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin: 8px 0 14px; }
+.bars .bar { flex: 1 0 58px; text-align: center; font-size: 12px; font-weight: 800; }
+.bars .bar .lab { margin-top: 4px; line-height: 1.25; white-space: nowrap; }
 .bars .pair { display: flex; gap: 4px; align-items: flex-end; justify-content: center; height: 70px; }
 .bars .col { display: block; width: 38%; border-radius: 6px 6px 0 0; min-height: 2px; }
 .bars .col.plan { background: #d8c9b0; }
@@ -178,6 +180,7 @@
 #skip-btn { display: block; width: 100%; margin-top: 8px; border: none; border-radius: 10px; padding: 7px 0; font-weight: 900; cursor: pointer;
   background: var(--green); color: #fff; font-size: 13px; }
 #skip-btn:hover { background: var(--green-dark); }
+#skip-btn.waiting, #skip-btn.waiting:hover { background: #9aa0a6; cursor: not-allowed; } /* v11 */
 #tray button { pointer-events: auto; border: none; border-radius: 10px; padding: 6px 10px; font-weight: 800; cursor: pointer; background: #eadfcc; color: var(--ink); }
 #tray button.danger { background: #f6d5d3; color: #a12a26; }
 .bubble .gone .ico { opacity: .45; filter: grayscale(1); }
@@ -229,6 +232,7 @@
 .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .chart-card { background: #fffaf0; border-radius: 12px; padding: 8px 10px; }
 .chart-card h5 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: #7a6650; }
+.chart-card h5 .sub { text-transform: none; letter-spacing: 0; font-size: 11px; }
 .bubble { display: inline-flex !important; justify-content: center; align-items: center; gap: 3px; min-width: 0; }
 .bubble.n1 { padding: 4px 8px; } .bubble.n2 { padding: 4px 9px; } .bubble.n3 { padding: 4px 10px; }
 .proposal-h { font-weight: 900; margin: 10px 0 4px; }
@@ -241,7 +245,7 @@
 #dialog .chip { white-space: nowrap; }
 #dialog .line .chip.ok { font-size: 12px; padding: 4px 9px; flex-shrink: 0; }
 /* v7: ingredient toggles (P29) */
-button.chip.toggle { cursor: pointer; font: inherit; font-weight: 800; }
+button.chip.toggle { cursor: pointer; font: inherit; font-weight: 800; color: var(--ink); } /* v11: dark text, also in dark mode */
 button.chip.toggle.ok { background: #e3f6ea; }
 button.chip.toggle:disabled { opacity: .45; cursor: default; }
 /* v7: monopoly progress in the HUD (shops with a manager / all shops) */

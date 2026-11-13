@@ -336,7 +336,8 @@ class StaffAgent extends StudentAgent {
           if (this.game.flow.playerIn(this.shop)) this.game.sound.play("clean");
           this.nextSwish = performance.now() + 1800;
         }
-        this.activity = s.work ? { icon: s.icon || "⚙️", text: s.text || "", progress: 1 - Math.max(0, this.waitLeft) / s.wait } : null;
+        const dyn = (s.dyn && s.dyn()) || {}; // v11: e.g. "Repairing" instead of "Refilling" at a broken machine
+        this.activity = s.work ? { icon: dyn.icon || s.icon || "⚙️", text: dyn.text || s.text || "", progress: 1 - Math.max(0, this.waitLeft) / s.wait } : null;
         if (this.waitLeft > 0) break;
         this.figure.work = null; this.activity = null;
         this.steps.shift();

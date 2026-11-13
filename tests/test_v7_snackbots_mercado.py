@@ -129,21 +129,29 @@ def test_breakdowns_are_reproducible_and_rare():
 
 
 def test_the_vending_manager_refills_repairs_and_brings_the_cash(monkeypatch):
+    # v11: the manager walks round the machines (manager_service per machine); without a
+    # browser a fallback round runs half an hour after opening and then every two hours.
     state = own(VEND)
     state["shops"][VEND].update({"manager": True, "manager_hired": True})
     state["manager_proposals"] = {VEND: logic.manager_proposal(state, VEND)}
     state, _ = go(state, t=7.0, type="tick")  # he buys his proposal at 07:00 ...
+    assert state["manager_proposals"][VEND]["bought"]
+    state, _ = go(state, t=8.5, type="tick")
     for p in CONFIG["shops"][VEND]["products"]:
-        assert logic.portions(state, VEND, p) > 0  # ... and fills the machines
+        assert logic.portions(state, VEND, p) > 0  # ... and the machines are full
     water = CONFIG["shops"][VEND]["products"][0]
-    state, _ = go(state, t=8.0, type="tick")
     money = state["money"]
-    state, _ = buy_at(state, MACHINES[2], water, 8.2)
-    state, _ = go(state, t=9.0, type="tick")
+    state, _ = buy_at(state, MACHINES[2], water, 8.6)
+    assert state["money"] == money  # the money waits in the cash box
+    state, res = go(state, t=8.8, type="manager_service", shop=VEND, machine=MACHINES[2])
     assert state["money"] == money + state["shops"][VEND]["prices"][water]  # he brought the cash
+    assert res["amount"] == state["shops"][VEND]["prices"][water] and "collected" in res["toast"]
     monkeypatch.setitem(mechanics.of(VEND).p, "breakdown_per_hour", 1.0)
     state, res = go(state, t=10.0, type="tick")
-    assert any("repaired" in t for t in res["toasts"])
+    assert all(mechanics.of(VEND).broken(state).values())  # no repairs by magic any more
+    state, res = go(state, t=10.1, type="manager_service", shop=VEND, machine=MACHINES[0])
+    assert "repaired" in res["toast"] and not mechanics.of(VEND).broken(state)[MACHINES[0]]
+    state, _ = go(state, t=12.2, type="tick")  # two hours without a full round: the fallback
     assert not any(mechanics.of(VEND).broken(state).values())
 
 

@@ -103,7 +103,7 @@ CONFIG = {
         "sold_out_daily_cap": 15,  # v8: sold-out losses cost at most this much reputation per day
         "order_cancelled": -3,  # you cancelled an accepted order
         "rejected": -1,  # you turned the customer away
-        "cleaning_missed": -5,
+        "cleaning_missed": -15,  # v11: per shop you had to clean and left dirty
     },
     # Daily phases: how many students are on campus and how likely they visit a café.
     "phases": [
@@ -226,11 +226,13 @@ CONFIG = {
         "surfboard": {
             "name": "Surfboard", "icon": "🏄", "unit": "board", "price": 6_000,
             "base_units": 1, "base_name": "boards", "shelf_days": None, "reusable": True,
+            "lifetime_uses": 40,  # v11: the cost of one rental is the board spread over its rentals
             "description": "A soft-top board for beginners. You keep it: it comes back after every rental.",
         },
         "wetsuit": {
             "name": "Wetsuit", "icon": "🤿", "unit": "suit", "price": 3_500,
             "base_units": 1, "base_name": "suits", "shelf_days": None, "reusable": True,
+            "lifetime_uses": 40,
             "description": "4/3 mm wetsuit. After a rental it has to dry for a while.",
         },
         "surf_instructor": {
@@ -482,7 +484,7 @@ CONFIG = {
         "surf_shack": {
             "name": "Surf Shack", "products": ["surf_rental", "wetsuit_rental", "surf_class"],
             "base_factor": 1.0, "start_owner": "bot", "order": 7, "zone": "beach",
-            "start_prices": {"surf_rental": 1_200, "wetsuit_rental": 600, "surf_class": 2_500},
+            "start_prices": {"surf_rental": 1_500, "wetsuit_rental": 800, "surf_class": 2_500},  # v11: with a margin
             "acquisition_cost": 300_000, "manager_cost": 35_000, "max_queue": 4, "open_hours": None,
             "mechanic": {"type": "rental", "rentals": {"surf_rental": {"hours": 2.0},
                                                        "wetsuit_rental": {"hours": 2.0, "dry_hours": 1.0}},
