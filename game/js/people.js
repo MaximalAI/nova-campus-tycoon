@@ -271,7 +271,7 @@ class StudentAgent {
   }
   faceTo(p) { this.faceTarget = Math.atan2(p.x - this.pos.x, p.z - this.pos.z); }
   // standing in a queue: others walk around me
-  anchored() { return !this.path.length && (this.mode === "queue" || this.mode === "served"); }
+  anchored() { return !this.path.length && (this.mode === "queue" || this.mode === "served" || this.mode === "machine_queue" || this.mode === "machine_use"); }
 }
 
 // v5: staff (manager or the competitor's barista) walk to the stations for each product,
@@ -311,8 +311,8 @@ class StaffAgent extends StudentAgent {
   tick(dtScaled, dtGameMin) {
     const v = this.game.view;
     // v6: a newly hired manager already comes in for the cleaning on his first evening
-    this.figure.visible = !!(v && this.game.screen === "game" && (v.shops[this.shop].auto ||
-      (this.shop === "cafe" && v.shops.cafe.manager)));
+    this.figure.visible = !!(v && this.game.screen === "game" && (this.shop === "snackbots" ? v.shops.snackbots.manager
+      : (v.shops[this.shop].auto || (this.shop === "cafe" && v.shops.cafe.manager)))); // v10: the vending manager only once hired
     if (!this.figure.visible) return;
     while (this.steps.length && !this.path.length) {
       const s = this.steps[0];
@@ -331,8 +331,10 @@ class StaffAgent extends StudentAgent {
         // v6: show what the staff member is doing (arms move, icon + progress above the head)
         this.figure.work = s.work || null;
         // v9: the cleaning sound goes with the animation (a swish every 1.8 s), only heard nearby
+        // v10: only heard when the player is in that shop
         if (s.work === "clean" && (!this.nextSwish || performance.now() > this.nextSwish)) {
-          this.game.sound.playAt("clean", this.pos); this.nextSwish = performance.now() + 1800;
+          if (this.game.flow.playerIn(this.shop)) this.game.sound.play("clean");
+          this.nextSwish = performance.now() + 1800;
         }
         this.activity = s.work ? { icon: s.icon || "⚙️", text: s.text || "", progress: 1 - Math.max(0, this.waitLeft) / s.wait } : null;
         if (this.waitLeft > 0) break;

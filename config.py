@@ -99,6 +99,7 @@ CONFIG = {
         "customer_lost": -3,  # waited too long and left
         "sold_out_left": -1,  # found the shelves empty and went home (v8: every time)
         "sold_out_to_competitor": -2,  # v8: found the shelves empty and went to a competitor
+        "sold_out_partial": -1,  # v10: part of the order was sold out, the customer took the rest
         "sold_out_daily_cap": 15,  # v8: sold-out losses cost at most this much reputation per day
         "order_cancelled": -3,  # you cancelled an accepted order
         "rejected": -1,  # you turned the customer away
@@ -450,9 +451,9 @@ CONFIG = {
             "base_factor": 1.0, "start_owner": "bot", "order": 4, "zone": "campus",
             "start_prices": {"sandwich": 300, "iced_tea": 150, "apple": 80},
             "acquisition_cost": 120_000, "manager_cost": 20_000, "max_queue": 4, "open_hours": None,
-            "mechanic": {"type": "shelves", "capacity": 60, "fill_until": 10.0, "scan_minutes": 1,
-                         "objectives": {"SET_PRICES": "Fill the shelves and set your prices at the register.",
-                                        "SHOP_OPEN": "Scan your customers' shopping at the register."}},
+            "mechanic": {"type": "shelves", "capacity": 60, "fill_until": 20.0, "scan_minutes": 1,
+                         "objectives": {"SET_PRICES": "Set your prices at the register, then start the day.",
+                                        "SHOP_OPEN": "Customers bring their shopping to the register - scan it there."}},
             "icon": "🛒",
             "building": {"x0": 12, "x1": 24, "z0": -31, "z1": -20, "door": "south", "wall": 0xf1f8e9,
                          "trim": 0x558b2f, "roof": 0xf9a825, "sign": "MERCADO & GO", "interior": "market"},
@@ -583,3 +584,67 @@ CONFIG = {
         },
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# v10: upgrades and cleaning per shop. Every shop gets three upgrades that fit what it
+# sells (same prices and bonuses as the café's three tiers, so the balance stays), and
+# the cleaning spots the player (or the manager) works through after closing.
+# ---------------------------------------------------------------------------
+_UPGRADE_TIERS = [{"factor_bonus": 0.15, "cost": 3_000}, {"factor_bonus": 0.20, "cost": 6_000},
+                  {"factor_bonus": 0.25, "cost": 10_000}]
+_SHOP_UPGRADES = {
+    "cafe": [("coffee_machine", "Better coffee machine", "⚙️"), ("seating", "Seating & decor", "🪴"),
+             ("branding", "Sign & branding", "🪧")],
+    "rival": [("coffee_machine", "Better coffee machine", "⚙️"), ("seating", "Seating & decor", "🪴"),
+              ("branding", "Sign & branding", "🪧")],
+    "snackbots": [("card_reader", "Card readers on every machine", "💳"), ("led_fronts", "Bright LED machine fronts", "💡"),
+                  ("branding", "SnackBots branding", "🪧")],
+    "mercado": [("drinks_fridge", "Chilled drinks fridge", "🧊"), ("fresh_corner", "Fresh bread & fruit corner", "🥖"),
+                ("branding", "Sign & branding", "🪧")],
+    "bowl_bar": [("pro_blender", "Pro blender", "🥤"), ("fresh_display", "Fresh ingredient display", "🥬"),
+                 ("branding", "Sign & branding", "🪧")],
+    "mensa": [("tray_line", "Faster tray line", "🍽️"), ("dining_hall", "Bright dining hall", "🪑"),
+              ("branding", "Sign & branding", "🪧")],
+    "surf_shack": [("new_boards", "New surfboards", "🏄"), ("beach_showers", "Beach showers", "🚿"),
+                   ("branding", "Sign & branding", "🪧")],
+    "praia_bar": [("lounge", "Lounge chairs", "🛋️"), ("dj_nights", "DJ evenings", "🎶"),
+                  ("branding", "Sign & branding", "🪧")],
+    "gelado": [("display_freezer", "Better display freezer", "🧊"), ("waffle_cones", "Fresh waffle cones", "🧇"),
+               ("branding", "Sign & branding", "🪧")],
+}
+for _shop, _ups in _SHOP_UPGRADES.items():
+    CONFIG["shops"][_shop]["upgrades"] = {
+        key: {"name": name, "icon": icon, **_UPGRADE_TIERS[i]} for i, (key, name, icon) in enumerate(_ups)
+    }
+
+_SHOP_CLEANING = {
+    "cafe": CONFIG["cleaning_spots"],
+    "rival": {"counter": {"name": "Wipe the counter", "minutes": 3},
+              "coffee_machine": {"name": "Clean the coffee machine and kettle", "minutes": 3},
+              "floor": {"name": "Sweep the floor", "minutes": 3}},
+    "mercado": {"register": {"name": "Wipe the register", "minutes": 2},
+                "shelves": {"name": "Tidy the shelves", "minutes": 3},
+                "floor": {"name": "Sweep the floor", "minutes": 3}},
+    "bowl_bar": {"counter": {"name": "Wipe the counter", "minutes": 3},
+                 "station": {"name": "Clean the assembly station", "minutes": 3},
+                 "tables": {"name": "Clear the tables", "minutes": 3},
+                 "floor": {"name": "Sweep the floor", "minutes": 3}},
+    "mensa": {"counter": {"name": "Wipe the food counter", "minutes": 3},
+              "station": {"name": "Clean the kitchen", "minutes": 3},
+              "tables": {"name": "Clear the tables", "minutes": 3},
+              "floor": {"name": "Sweep the floor", "minutes": 3}},
+    "surf_shack": {"counter": {"name": "Wipe the counter", "minutes": 3},
+                   "station": {"name": "Rinse the boards and wetsuits", "minutes": 3},
+                   "floor": {"name": "Sweep out the sand", "minutes": 3}},
+    "praia_bar": {"counter": {"name": "Wipe the bar", "minutes": 3},
+                  "station": {"name": "Clean the taps and grill", "minutes": 3},
+                  "tables": {"name": "Clear the tables", "minutes": 3},
+                  "floor": {"name": "Sweep the floor", "minutes": 3}},
+    "gelado": {"counter": {"name": "Wipe the counter", "minutes": 3},
+               "station": {"name": "Clean the ice cream display", "minutes": 3},
+               "floor": {"name": "Sweep the floor", "minutes": 3}},
+    "snackbots": {},  # vending machines: nobody cleans a shop floor
+}
+for _shop, _spots in _SHOP_CLEANING.items():
+    CONFIG["shops"][_shop]["cleaning"] = _spots

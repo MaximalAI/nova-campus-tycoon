@@ -64,6 +64,12 @@ class Game {
     // v7: staff for every new shop with a counter (vending machines have none)
     const hairs = [0x111111, 0x8d5524, 0xe8c07d, 0x5a3825, 0xa0522d, 0x2b1d0e, 0xd4a017];
     this.world.newShops.forEach((key, i) => {
+      if (P[key].vending && this.config.shops[key].building.interior === "office") {
+        // v10: the vending manager: works from the office desk and does his rounds to the machines
+        Object.assign(P[key], { staff: P[key].upBoard, homeFace: P[key].frame.at(P[key].frame.depth - 2.0, -(P[key].frame.width / 2 - 1.4)), behind: () => false });
+        this.workers[key] = new StaffAgent(this, key, { shirt: 0x37474f, pants: 0x22223b, hair: hairs[i % hairs.length], skin: 0xe0ac69 }, { cap: 0x37474f });
+        return;
+      }
       if (P[key].vending) return;
       this.workers[key] = new StaffAgent(this, key, { shirt: BUILDINGS[key].trim, pants: 0x22223b, hair: hairs[i % hairs.length], skin: [0xf1c27d, 0xe0ac69, 0xc68642, 0xffdbac][i % 4] }, { apron: true });
     });
@@ -567,7 +573,7 @@ class Game {
       if (key === "cafe" || !w.buildingParts[key]) continue;
       w.buildingParts[key].roof.material.color.setHex(v.shops[key].owner === "player" ? 0x2e8b57 : BUILDINGS[key].roof);
     }
-    w.floorSpot.visible = v.day_state === "CLOSING" && !v.cleaning.floor;
+    w.floorSpot.visible = v.day_state === "CLOSING" && !!v.cleaning.cafe && v.cleaning.cafe.floor === false;
     w.updatePriceBoards(v);
     this.staff.cashier.animate(0);
     // Objective marker

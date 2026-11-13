@@ -154,7 +154,7 @@ def _start_day(state: dict, day: int) -> dict:
         "last_call": False,
         "current_order": None,
         "tray": [],
-        "cleaning": {spot: False for spot in CONFIG["cleaning_spots"]},
+        "cleaning": {},  # v10: {shop: {spot: done}}, filled at closing time
         "stats": _empty_stats(),
         "summary": None,
         "students": st.make_pool(state["seed"], day),
@@ -238,6 +238,22 @@ def migrate(state: dict) -> dict:
     state.setdefault("jep", easter_eggs.jep_spot(state["seed"], state["day"]))  # v8
     state.setdefault("high_until", 0)
     state.setdefault("drunk_until", 0)  # v9
+    # v10: cleaning per shop ({shop: {spot: done}}); a v9 save has the café's spots flat
+    cleaning = state.get("cleaning") or {}
+    if cleaning and all(isinstance(v, bool) for v in cleaning.values()):
+        state["cleaning"] = {"cafe": cleaning}
+    state.setdefault("cleaning", {})
+    # v10: themed upgrades per shop - an old upgrade key counts as the same tier of the new list
+    legacy = list(CONFIG["upgrades"])
+    for shop_id, shop in state["shops"].items():
+        catalogue = list(upgrade_catalogue(shop_id))
+        mapped = []
+        for u in shop.get("upgrades", []):
+            if u not in catalogue and u in legacy and legacy.index(u) < len(catalogue):
+                u = catalogue[legacy.index(u)]
+            if u in catalogue and u not in mapped:
+                mapped.append(u)
+        shop["upgrades"] = mapped
     if "students" in state:  # v7: the beach visitors exist (but do not come before the beach opens)
         for sid, student in st.make_pool(state["seed"], state["day"]).items():
             if sid not in state["students"]:
@@ -287,7 +303,8 @@ def manager_proposal(state: dict, shop: str) -> dict:
         sold_out = bool(missed)
         buffer = m["sold_out_buffer"] if sold_out else m["buffer"]
         # v8: customers who found it sold out count as demand too (sold-out now costs reputation)
-        plan[p] = max(m["min_portions"], math.ceil((sold + missed) * buffer))
+        plan[p] = max(m["min_portions"], math.ceil((sold + missed) * buffer),
+                      mechanics.of(shop).plan_floor(state, p))  # v10: e.g. fill every vending machine
         if y and sold_out:
             prices[p] = min(PRODUCTS[p].get("max_price", CONFIG["max_price"]), prices[p] + CONFIG["price_step"])
         elif y and sold == 0:
@@ -338,6 +355,29 @@ def _manager_buys(state: dict, shop: str, plan: dict | None = None, prices: dict
 # ---------------------------------------------------------------------------
 
 
+def upgrade_catalogue(shop: str) -> dict:
+    """v10: the upgrades that fit this shop (the café's three for shops without their own)."""
+    return SHOPS[shop].get("upgrades") or CONFIG["upgrades"]
+
+
+def cleaning_spots(shop: str) -> dict:
+    """v10: what has to be cleaned in this shop after closing (nothing in a vending shop)."""
+    if not mechanics.of(shop).staffed:
+        return {}
+    return SHOPS[shop].get("cleaning") or CONFIG["cleaning_spots"]
+
+
+def cleaning_shops(state: dict) -> list[str]:
+    """v10: the shops that are cleaned tonight: owned, with staff, open today."""
+    return [s for s in owned_shops(state)
+            if cleaning_spots(s) and state["shops"][s].get("opens_day", 1) <= state["day"]]
+
+
+def cleaning_left(state: dict, shop: str) -> int:
+    spots = state.get("cleaning", {}).get(shop, {})
+    return sum(1 for done in spots.values() if not done)
+
+
 def owned_shops(state: dict) -> list[str]:
     return [s for s in SHOP_ORDER if state["shops"][s]["owner"] == "player"]
 
@@ -370,7 +410,7 @@ def shop_operating(state: dict, shop: str) -> bool:
 def shop_factor(state: dict, shop: str) -> float:
     data = state["shops"][shop]
     factor = SHOPS[shop]["base_factor"] + sum(
-        CONFIG["upgrades"][u]["factor_bonus"] for u in data["upgrades"]
+        upgrade_catalogue(shop)[u]["factor_bonus"] for u in data["upgrades"] if u in upgrade_catalogue(shop)
     )
     if data["owner"] == "player":
         factor *= state["rep_factor"]
@@ -742,6 +782,8 @@ def _close(state) -> dict:
     state["open"] = False
     state["closed"] = True
     state["day_state"] = CLOSING
+    # v10: every owned shop with staff is cleaned tonight (by you or by its manager)
+    state["cleaning"] = {s: {spot: False for spot in cleaning_spots(s)} for s in cleaning_shops(state)}
     cancelled = None
     if state["current_order"]:
         cancelled = state["current_order"]["student"]
@@ -756,8 +798,14 @@ def _close(state) -> dict:
 
 def _end_day(state) -> dict:
     """Spoilage, statistics, reputation for missed cleaning, game-over check."""
-    if not all(state["cleaning"].values()):
-        _change_reputation(state, CONFIG["reputation"]["cleaning_missed"])
+    for shop, spots in state.get("cleaning", {}).items():
+        if all(spots.values()):
+            continue
+        if state["shops"][shop]["manager"]:
+            for spot in spots:
+                spots[spot] = True  # the manager finishes the job (also when nobody watched)
+        else:
+            _change_reputation(state, CONFIG["reputation"]["cleaning_missed"])  # v10: per shop you left dirty
     spoiled_value = 0
     spoiled = {}
     for shop in owned_shops(state):
@@ -937,14 +985,17 @@ def _ev_tick(state, ev):
 
 
 def _ev_clean(state, ev):
-    spot = ev.get("spot")
-    if spot not in CONFIG["cleaning_spots"]:
-        raise GameError("Unknown cleaning spot.")
+    """v10: clean one spot of one shop (the player in the shop he runs, a manager in his)."""
+    spot, shop = ev.get("spot"), ev.get("shop", "cafe")
     if not state["closed"] or state["day_state"] != CLOSING:
         raise GameError("You can only clean up after closing time.")
-    state["cleaning"][spot] = True
+    if shop not in state["cleaning"]:
+        raise GameError(f"{SHOPS.get(shop, {}).get('name', shop)} does not need cleaning tonight.")
+    if spot not in state["cleaning"][shop]:
+        raise GameError("Unknown cleaning spot.")
+    state["cleaning"][shop][spot] = True
     result = {"toast": "Done"}
-    if all(state["cleaning"].values()):
+    if all(all(spots.values()) for spots in state["cleaning"].values()):
         result.update(_end_day(state))
     return result
 
@@ -963,15 +1014,16 @@ def _ev_next_day(state, ev):
 def _ev_buy_upgrade(state, ev):
     shop, upgrade = ev.get("shop", "cafe"), ev.get("upgrade")
     _require_owned(state, shop)
-    if upgrade not in CONFIG["upgrades"]:
-        raise GameError("Unknown upgrade.")
+    catalogue = upgrade_catalogue(shop)  # v10: every shop has its own upgrades
+    if upgrade not in catalogue:
+        raise GameError(f"This upgrade does not fit {SHOPS[shop]['name']}.")
     if upgrade in state["shops"][shop]["upgrades"]:
         raise GameError("You already have this upgrade.")
-    cost = CONFIG["upgrades"][upgrade]["cost"]
+    cost = catalogue[upgrade]["cost"]
     _pay(state, cost)
     state["shops"][shop]["upgrades"].append(upgrade)
     state["stats"]["spending"] += cost
-    return {"toast": f"{CONFIG['upgrades'][upgrade]['name']} bought"}
+    return {"toast": f"{catalogue[upgrade]['name']} bought"}
 
 
 def _ev_hire_manager(state, ev):
@@ -1163,7 +1215,9 @@ def _ev_at_counter(state, ev):
     # here with the other café and with keeping the money. Whatever is worth most wins.
     if decision["action"] == "shop" and decision["shop"] == shop:
         st.transition(student, "join_queue")  # stays at the counter with the new order
-        return {"items": decision["items"], "sold_out": sold_out,
+        # v10: still a disappointed customer (Mercado: the product was not on the shelf)
+        delta = _sold_out_penalty(state, student, partial=True) if state["shops"][shop]["owner"] == "player" else 0
+        return {"items": decision["items"], "sold_out": sold_out, "rep_delta": delta,
                 "reason": "The rest of the order is still worth the money here."}
     delta = 0
     if state["shops"][shop]["owner"] == "player":
@@ -1322,12 +1376,12 @@ def _ev_patience_expired(state, ev):
     return result
 
 
-def _sold_out_penalty(state, student: dict, to_competitor: bool = False) -> float:
+def _sold_out_penalty(state, student: dict, to_competitor: bool = False, partial: bool = False) -> float:
     """A student who finds your shelves empty and leaves costs reputation, every time (v8).
 
     Going to a competitor instead costs more than simply going home."""
     student["disappointed"] = True
-    key = "sold_out_to_competitor" if to_competitor else "sold_out_left"
+    key = "sold_out_partial" if partial else "sold_out_to_competitor" if to_competitor else "sold_out_left"
     # at most this much per day, so one bad day cannot destroy the whole reputation
     lost = state["stats"].get("sold_out_rep", 0)
     delta = max(CONFIG["reputation"][key], -(CONFIG["reputation"]["sold_out_daily_cap"] - lost))
@@ -1422,6 +1476,8 @@ def _ev_auto_serve(state, ev):
         elif not missing:
             # v5: happy customers of your manager also improve the reputation
             delta = _change_reputation(state, CONFIG["reputation"]["staff_served"])
+        else:
+            delta = _sold_out_penalty(state, student, partial=True)  # v10: got only part of it
     st.transition(student, "served")
     student["intent"] = None
     return {"items": items, "amount": amount, "tip": tip, "rep_delta": delta}
@@ -1729,18 +1785,22 @@ def objective(state: dict) -> str:
         if target:
             return f"{runs}. Save up and buy the next shop: {SHOPS[target]['name']} ({euro(acquisition_cost(target))})."
         return "Your managers run every shop on the map."
-    if ds == CLOSING and state["shops"]["cafe"]["manager"]:  # v8: only a working manager cleans
-        done = sum(state["cleaning"].values())
-        return f"Your manager cleans the café ({done}/{len(state['cleaning'])})."
+    if ds == CLOSING:  # v10: the player cleans the shop he ran, managers clean theirs
+        mine = [s for s in state["cleaning"] if not state["shops"][s]["manager"] and cleaning_left(state, s)]
+        if mine:
+            s = mine[0]
+            total = len(state["cleaning"][s])
+            return f"Clean up {SHOPS[s]['name']} ({total - cleaning_left(state, s)}/{total})."
+        busy = [s for s in state["cleaning"] if cleaning_left(state, s)]
+        if busy:
+            left = sum(cleaning_left(state, s) for s in busy)
+            return f"Your manager{'s' if len(busy) > 1 else ''} clean{'' if len(busy) > 1 else 's'} up ({left} spots left)."
     special = mechanics.of(ws).objective(state, ds) if ws else None
     if special and ds in (SET_PRICES, SHOP_OPEN):
         return special
     if ws and SHOPS[ws]["start_owner"] != "player" and ds in (MORNING_PLANNING, WALK_TO_CAFE, SET_PRICES, SHOP_OPEN):
         text = OBJECTIVES[WALK_TO_CAFE if ds == WALK_TO_WHOLESALE and state["bag"] else ds]
         return text.replace("in your café", f"for {SHOPS[ws]['name']}").replace("your café", SHOPS[ws]["name"])
-    if ds == CLOSING:
-        done = sum(state["cleaning"].values())
-        return f"Clean up the café ({done}/{len(state['cleaning'])})."
     if ds == WALK_TO_WHOLESALE and state["bag"]:
         return OBJECTIVES[WALK_TO_CAFE]
     return OBJECTIVES[ds]

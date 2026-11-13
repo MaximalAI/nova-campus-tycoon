@@ -350,6 +350,19 @@ class World {
     this.buildingParts[key] = parts;
   }
 
+  // v10: the cleaning spots of a shop (after closing; the player cleans the shop he ran)
+  addCleaningSpots(shop, spots) {
+    const g = this.game;
+    this.cleanSpots = this.cleanSpots || {};
+    this.cleanSpots[shop] = spots;
+    for (const [spot, pos] of Object.entries(spots)) {
+      if (!pos || !(g.config.shops[shop].cleaning || {})[spot]) continue;
+      this.addInteractable({ id: `clean_${shop}_${spot}`, pos, meshes: [], cleaning: spot, cleanShop: shop, priority: 2, radius: 1.8,
+        label: () => g.config.shops[shop].cleaning[spot].name,
+        enabled: () => g.flow.canClean(shop, spot), action: () => g.flow.openCleaning(spot, shop) });
+    }
+  }
+
   addInteractable(spec) {
     const it = Object.assign({ radius: 2.1, enabled: () => true, meshes: [] }, spec);
     for (const m of it.meshes) {
@@ -453,6 +466,27 @@ class World {
     g.position.set(x, 0, z); g.rotation.y = rotY || 0;
     this.scene.add(g);
     return meshes;
+  }
+
+  // v10: the board in the SnackBots office that explains the four machine lights
+  legendBoard() {
+    const c = document.createElement("canvas"); c.width = 512; c.height = 384;
+    const g = c.getContext("2d");
+    g.fillStyle = "#263238"; g.fillRect(0, 0, 512, 384);
+    g.fillStyle = "#ffffff"; g.font = "900 40px sans-serif"; g.textAlign = "center"; g.fillText("MACHINE LIGHTS", 256, 52);
+    const rows = [["#2ecc71", "Green: all fine"], ["#f1c40f", "Yellow: empty - refill"], ["#3498db", "Blue: cash to collect"], ["#e74c3c", "Red: broken - repair"]];
+    rows.forEach(([col, text], i) => {
+      const y = 110 + i * 70;
+      g.fillStyle = col; g.beginPath(); g.arc(60, y, 22, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "#ffffff"; g.font = "700 34px sans-serif"; g.textAlign = "left"; g.fillText(text, 100, y + 12);
+    });
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.35, 0.08), [
+      this.mat(0x37474f), this.mat(0x37474f), this.mat(0x37474f), this.mat(0x37474f),
+      new THREE.MeshLambertMaterial({ map: tex }), this.mat(0x37474f)]);
+    m.position.y = 1.6; m.castShadow = true;
+    this.scene.add(m);
+    return m;
   }
 
   board(text, x, z, rotY, color) {
@@ -567,11 +601,11 @@ class World {
     const cleaning = { counter: [counter, { x: -34.2, z: -2.5 }], coffee_machine: [coffee[0], { x: -38.1, z: -3.6 }],
       tables: [tables[1], { x: -30.8, z: 2.7 }], floor: [floorSpot, { x: -31.5, z: 1.6 }] };
     for (const [spot, [mesh, pos]] of Object.entries(cleaning)) {
-      this.addInteractable({ id: "clean_" + spot, pos, meshes: [mesh], cleaning: spot, priority: 2,
+      this.addInteractable({ id: "clean_" + spot, pos, meshes: [mesh], cleaning: spot, cleanShop: "cafe", priority: 2,
         label: () => g.config.cleaning_spots[spot].name,
         // v6: with a manager the player cannot clean - the manager does it
-        enabled: () => g.view && g.view.day_state === "CLOSING" && !g.view.cleaning[spot] && !g.view.shops.cafe.manager,
-        action: () => g.flow.openCleaning(spot) });
+        enabled: () => g.flow.canClean("cafe", spot),
+        action: () => g.flow.openCleaning(spot, "cafe") });
     }
     this.addInteractable({ id: "counter_front_cafe", pos: { x: -35.6, z: 0.2 }, radius: 1.8, meshes: [], priority: 1,
       label: () => g.flow.counterLabel("cafe"), enabled: () => g.flow.counterLabel("cafe") !== null,
@@ -595,6 +629,7 @@ class World {
       this.box(0.15, 0.75, 0.15, 0x555555, x, 0.38, -18.2);
       this.collide(x - 0.7, x + 0.7, -18.9, -17.5);
     }
+    this.addCleaningSpots("rival", { counter: { x: -2.0, z: -20.4 }, coffee_machine: { x: -3.4, z: -25.1 }, floor: { x: 0, z: -17.6 } });
     const rivalManual = () => g.isManual("rival");
     const owned = () => g.view && g.view.shops.rival.owner === "player";
     this.addInteractable({ id: "register_rival", pos: { x: 0.6, z: -21.9 }, meshes: [register], label: () => g.flow.registerLabel(),
@@ -663,7 +698,10 @@ class World {
     cg.fillStyle = "#c0392b"; cg.fillRect(0, 0, 1024, 320);
     cg.strokeStyle = "#ffffff"; cg.lineWidth = 12; cg.strokeRect(14, 14, 996, 292);
     cg.fillStyle = "#ffffff"; cg.textAlign = "center"; cg.textBaseline = "middle";
-    cg.font = "900 120px sans-serif"; cg.fillText("🏖️ BEACH", 512, 112);
+    // v10: the word is centred on the sign; the umbrellas stand left and right of it
+    cg.font = "900 120px sans-serif"; cg.fillText("BEACH", 512, 112);
+    const half = cg.measureText("BEACH").width / 2;
+    cg.font = "90px serif"; cg.fillText("🏖️", 512 - half - 80, 108); cg.fillText("🏖️", 512 + half + 80, 108);
     cg.font = "800 54px sans-serif"; cg.fillText("opens when the campus is yours", 512, 232);
     const signTex = new THREE.CanvasTexture(c); signTex.colorSpace = THREE.SRGBColorSpace;
     // one face per side, so the text reads correctly from the campus and from the beach
@@ -788,21 +826,32 @@ class World {
         // product shelves along the side walls (customer side), filled from the storage
         this.marketShelves = this.marketShelves || {};
         this.marketShelves[key] = [];
+        // v10: open shelving units with a sign (v7: a solid block that stood in the upgrade board)
         spec.products.forEach((p, i) => {
-          const side = i % 2 ? 1 : -1, d = i < 2 ? 3.8 : 5.9;
-          const shelf = boxAt(0.6, 1.6, 1.6, 0x8d6e63, d, side * (W / 2 - 0.45), 0.8);
-          const rr = f.rect(d - 0.8, d + 0.8, side * (W / 2), side * (W / 2 - 0.8)); this.collide(rr.x0, rr.x1, rr.z0, rr.z1);
+          const side = i % 2 ? 1 : -1, d = i < 2 ? 4.5 : 6.2;
+          const lat = side * (W / 2 - 0.4);
+          const parts = [];
+          parts.push(boxAt(0.06, 1.7, 1.5, 0x6d4c41, d, side * (W / 2 - 0.12), 0.85)); // back panel
+          for (const y of [0.1, 0.65, 1.2]) parts.push(boxAt(0.55, 0.05, 1.5, 0x8d6e63, d, lat, y));
+          for (const dd of [-0.73, 0.73]) parts.push(boxAt(0.55, 1.7, 0.05, 0x6d4c41, d + dd, lat, 0.85));
+          const rr = f.rect(d - 0.8, d + 0.8, side * (W / 2), side * (W / 2 - 0.75)); this.collide(rr.x0, rr.x1, rr.z0, rr.z1);
           const goods = [];
-          for (let k = 0; k < 4; k++) {
-            const m = boxAt(0.36, 0.26, 0.36, 0xffffff, d - 0.4 + (k % 2) * 0.8, side * (W / 2 - 0.85), 0.55 + Math.floor(k / 2) * 0.5);
-            m.material = this.mat([0xffd166, 0x4ea8de, 0xe63946][i % 3]);
+          for (let k = 0; k < 6; k++) {
+            const m = boxAt(0.32, 0.26, 0.32, 0xffffff, d - 0.45 + (k % 3) * 0.45, lat, 0.26 + Math.floor(k / 3) * 0.55);
+            m.material = this.mat(this.productColor(p));
             m.userData.dynamic = true; // shown by the stock on the shelf
             goods.push(m);
           }
+          // the product's sign on top, facing the aisle
+          const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.36),
+            new THREE.MeshBasicMaterial({ map: this.textTexture(`${g.config.products[p].icon} ${g.config.products[p].name}`, "#33691e", "#ffffff", 512, 132, 60) }));
+          const sp = at(d, side * (W / 2 - 0.16)); sign.position.set(sp.x, 1.95, sp.z); sign.rotation.y = f.faceLat(-side); this.scene.add(sign);
+          this.marketShelves = this.marketShelves || {};
+          this.marketShelves[key] = this.marketShelves[key] || [];
           this.marketShelves[key].push({ product: p, goods });
           const front = at(d, side * (W / 2 - 1.5));
           stationAt["shelf_" + p] = front;
-          this.addInteractable({ id: `shelf_${key}_${p}`, pos: front, meshes: [shelf], radius: 1.7,
+          this.addInteractable({ id: `shelf_${key}_${p}`, pos: front, meshes: parts, radius: 1.7,
             label: () => g.flow.shelfLabel(key), enabled: () => g.flow.shelfLabel(key) !== null, action: () => g.flow.openShelves(key) });
         });
       } else {
@@ -817,18 +866,46 @@ class World {
       this.addInteractable({ id: `upgrade_board_${key}`, pos: pt.upBoard, radius: 2.4, meshes: [up], label: () => "Upgrades & staff",
         enabled: owned, action: () => g.flow.openUpgrades(key) });
     }
+    const office = b.interior === "office";
+    // v10: in the office the day plan hangs near the door, the shelf stands deeper in the room
+    // (in v9 the shelf stood in front of the plan board)
+    const planDepth = office ? 1.9 : 2.4;
     const plan = this.board("DAY PLAN", 0, 0, 0, "#2a9d8f");
-    place(plan, 2.4, W / 2 - 0.08, f.faceLat(-1));
+    place(plan, planDepth, W / 2 - 0.08, f.faceLat(-1));
+    if (office) pt.planBoard = at(planDepth, W / 2 - 1.0);
     this.addInteractable({ id: `plan_board_${key}`, pos: pt.planBoard, radius: 2.4, meshes: [plan], label: () => g.flow.planBoardLabel(key),
       enabled: () => owned() && g.flow.planBoardLabel(key) !== null, action: () => g.flow.usePlanBoard(key) });
+    if (office) {
+      // v10: upgrade board on the other wall, and a board that explains the machine lights
+      const up = this.board("UPGRADES", 0, 0, 0, "#e76f51");
+      place(up, planDepth, -(W / 2 - 0.08), f.faceLat(1));
+      this.addInteractable({ id: `upgrade_board_${key}`, pos: at(planDepth, -(W / 2 - 1.0)), radius: 2.0, meshes: [up], label: () => "Upgrades & staff",
+        enabled: owned, action: () => g.flow.openUpgrades(key) });
+      const legend = this.legendBoard();
+      place(legend, D - 0.1, 0.4, f.faceDoor);
+      this.addInteractable({ id: `legend_${key}`, pos: at(D - 1.4, 0.4), radius: 1.6, meshes: [legend], label: () => "What the machine lights mean",
+        enabled: () => true, action: () => g.flow.openMachineLegend(key) });
+      pt.storage = at(D - 1.7, W / 2 - 0.9);
+    }
     const sp = pt.storage;
-    const vend = b.interior === "vending" || b.interior === "office"; // v9: the office shelf stands along the side wall too
+    const vend = b.interior === "vending" || office; // v9: the office shelf stands along the side wall too
     const shelf = this.storageShelf(key, sp.x, sp.z, vend ? f.faceLat(-1) : f.faceDoor, items);
-    const sr = vend ? f.rect(D - 3.9, D - 1.7, W / 2 - 0.6, W / 2) : f.rect(D - 1.3, D, W / 2 - 2.9, W / 2 - 0.7);
+    const sr = office ? f.rect(D - 2.8, D - 0.6, W / 2 - 0.6, W / 2) : vend ? f.rect(D - 3.9, D - 1.7, W / 2 - 0.6, W / 2) : f.rect(D - 1.3, D, W / 2 - 2.9, W / 2 - 0.7);
     this.collide(sr.x0, sr.x1, sr.z0, sr.z1);
-    this.addInteractable({ id: `storage_${key}`, pos: vend ? at(D - 2.8, W / 2 - 2.0) : at(D - 1.9, W / 2 - 1.8), meshes: shelf,
+    this.addInteractable({ id: `storage_${key}`, pos: office ? at(D - 1.7, W / 2 - 2.0) : vend ? at(D - 2.8, W / 2 - 2.0) : at(D - 1.9, W / 2 - 1.8), meshes: shelf,
       label: () => "Stock the goods", enabled: () => owned() && g.flow.bagHasItemsFor(key), action: () => g.flow.openStock(key) });
     pt.stationAt = stationAt;
+    // v10: cleaning spots (the names come from the shop's "cleaning" config)
+    const firstStation = Object.entries(stationAt).find(([k]) => !k.startsWith("shelf_"));
+    const firstShelf = Object.entries(stationAt).find(([k]) => k.startsWith("shelf_"));
+    this.addCleaningSpots(key, {
+      counter: at(cd - 0.9, -1.2),
+      station: firstStation ? firstStation[1] : null,
+      tables: at(3.3, -(W / 2 - 2.5)),
+      floor: at(1.6, 1.0),
+      register: b.interior === "market" ? at(cd - 0.9, 0.6) : null,
+      shelves: firstShelf ? firstShelf[1] : null,
+    });
   }
 
   // v5: a price board in front of each café ("-" until today's prices are set),
@@ -920,7 +997,7 @@ class World {
     for (const [shop, shelves] of Object.entries(this.marketShelves || {})) {
       const s = view.shops[shop];
       for (const { product, goods } of shelves) {
-        const n = s.owner === "bot" ? goods.length : Math.min(goods.length, Math.ceil((s.front[product] || 0) / 5));
+        const n = s.owner === "bot" ? goods.length : Math.min(goods.length, Math.ceil((s.front[product] || 0) / 3)); // v10: 6 boxes
         goods.forEach((m, i) => { m.visible = i < n; });
       }
     }
@@ -969,6 +1046,10 @@ class World {
     // Gate in the door: closed until the player enters via P03, and while unpaid goods are in the cart
     this.gates.wholesale = { x0: 27.75, x1: 28.25, z0: -1.8, z1: 1.8, active: true };
     this.colliders.push(this.gates.wholesale);
+  }
+
+  productColor(p) {
+    return { sandwich: 0xd7a86e, iced_tea: 0xffb74d, apple: 0xe53935 }[p] || 0x4ea8de;
   }
 
   itemColor(item) {

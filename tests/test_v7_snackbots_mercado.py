@@ -190,13 +190,16 @@ def test_sandwiches_are_made_from_bread_and_cheese_when_stocking():
         assert logic.stock_units(state, MARKET, item) == before[item] - 10 * q
 
 
-def test_shelves_can_only_be_filled_in_the_morning():
+def test_shelves_can_be_refilled_during_the_day_but_not_after_closing():
+    # v10: the morning-only rule (until 10:00) was hard to understand; refilling works all day
     state = market_stocked()
     p = CONFIG["shops"][MARKET]["products"][1]
-    until = CONFIG["shops"][MARKET]["mechanic"]["fill_until"]
-    state, _ = go(state, t=until - 0.5, type="fill_front", shop=MARKET, amounts={p: 5})
-    with pytest.raises(GameError, match="morning"):
-        go(state, t=until + 0.1, type="fill_front", shop=MARKET, amounts={p: 5})
+    state, _ = go(state, t=7.0, type="fill_front", shop=MARKET, amounts={p: 2})
+    state, _ = go(state, t=14.0, type="fill_front", shop=MARKET, amounts={p: 2})
+    assert logic.front_units(state, MARKET, p) == 4
+    state, _ = go(state, t=20.0, type="tick")
+    with pytest.raises(GameError, match="closed"):
+        go(state, t=20.2, type="fill_front", shop=MARKET, amounts={p: 2})
 
 
 def test_students_only_buy_what_is_on_the_shelves_and_pay_at_the_checkout():

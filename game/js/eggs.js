@@ -683,7 +683,7 @@ class EasterEggs {
       text: "Pick a chip and a field, then spin. Red/Black and Even/Odd pay 1:1, each dozen pays 2:1. On 0 every bet loses.",
       body: (b) => this.rouletteBody(b),
       secondary: { label: "Leave the table" },
-      primary: { label: "Spin", disabled: () => this.spinning || !this.v || this.v.money < this.chip, action: () => { this.spin(); return "keep"; } },
+      primary: { label: "Spin", disabled: () => this.spinning || !this.v || this.v.money < this.chip, action: () => { this.spin(); } },
     });
   }
 
@@ -706,27 +706,32 @@ class EasterEggs {
     b.querySelectorAll("[data-bet]").forEach((x) => { x.onclick = () => { this.bet = x.dataset.bet; this.game.sound.play("click"); this.game.ui.refreshDialog(); }; });
   }
 
+  // v10: the dialog closes when the wheel spins, so you watch the table; it comes back
+  // with the result
   spin() {
     if (this.spinning) return;
-    const g = this.game, d = g.ui.current;
+    const g = this.game;
     this.spinning = true;
     this.lastSpin = null;
-    g.ui.refreshDialog();
     g.sound.play("spin");
     const started = performance.now();
     this.wheelSpeed = 9; this.ballSpeed = -13;
     this.placeChips(this.bet, this.chip); // v9: the stake lands on the table
+    // look at the table from the player's side while it spins
+    g.camYaw = 0; g.camPitch = 0.75; g.camDist = Math.min(g.camDist, 4.5);
     g.flow.send("roulette", { bet: this.bet, amount: this.chip }, (r) => {
       const reveal = () => {
         this.spinning = false;
         this.wheelSpeed = 0; this.ballSpeed = 0;
-        if (!r.ok) { this.settleChips(false); g.ui.toast(r.error, true); g.ui.refreshDialog(); return; }
+        if (!r.ok) { this.settleChips(false); g.ui.toast(r.error, true); return; }
         this.lastSpin = r.result;
         this.landBall(r.result.number);
         this.settleChips(r.result.won);
         this.history = [r.result, ...this.history].slice(0, 8);
         g.sound.play(r.result.won ? "win" : "lose");
-        if (g.ui.current === d) g.ui.refreshDialog();
+        g.ui.toast(r.result.won ? `${r.result.number}! You win ${euro(r.result.change)}` : `${r.result.number} - you lose ${euro(-r.result.change)}`);
+        // back to the table after a short look at the chips
+        setTimeout(() => { if (g.inCasino && !g.ui.current) this.openRoulette(); }, 1600);
       };
       setTimeout(reveal, Math.max(0, 2700 - (performance.now() - started)));
     });

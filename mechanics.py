@@ -111,6 +111,10 @@ class Mechanic:
     def end_day(self, state: dict) -> int:
         return 0
 
+    def plan_floor(self, state: dict, product: str) -> int:
+        """v10: the least a manager plans of a product (shops with a front fill it)."""
+        return 0
+
     def manager_fill(self, state: dict) -> None:
         """A working manager keeps the front filled."""
         if self.front_products() and state["shops"][self.shop]["manager"]:
@@ -202,16 +206,31 @@ class Vending(Mechanic):
         for mid in ids:
             if mid not in self.machine_ids():
                 raise logic.GameError("Unknown machine.")
-            m = self.machines(state)[mid]
-            for product in CONFIG["shops"][self.shop]["products"]:
-                uses = CONFIG["products"][product]["uses"]
-                can = min(logic.stock_units(state, self.shop, i) // q for i, q in uses.items())
-                n = min(can, self.p["capacity"] - m["stock"].get(product, 0))
-                if n > 0:
-                    logic._use_ingredients(state, self.shop, {i: q * n for i, q in uses.items()})
-                    m["stock"][product] = m["stock"].get(product, 0) + n
-                    moved[product] = moved.get(product, 0) + n
+        ms = self.machines(state)
+        for product in CONFIG["shops"][self.shop]["products"]:
+            uses = CONFIG["products"][product]["uses"]
+            can = min(logic.stock_units(state, self.shop, i) // q for i, q in uses.items())
+            # v10: with all machines, the goods are shared out evenly (one at a time, emptiest first)
+            put = {mid: 0 for mid in ids}
+            for _ in range(can):
+                room = [mid for mid in ids if ms[mid]["stock"].get(product, 0) + put[mid] < self.p["capacity"]]
+                if not room:
+                    break
+                mid = min(room, key=lambda m: (ms[m]["stock"].get(product, 0) + put[m], ids.index(m)))
+                put[mid] += 1
+            n = sum(put.values())
+            if n > 0:
+                logic._use_ingredients(state, self.shop, {i: q * n for i, q in uses.items()})
+                for mid, k in put.items():
+                    if k:
+                        ms[mid]["stock"][product] = ms[mid]["stock"].get(product, 0) + k
+                moved[product] = n
         return moved
+
+    def plan_floor(self, state: dict, product: str) -> int:
+        """v10: the manager plans enough to fill every machine, not only yesterday's sales."""
+        in_machines = sum(m["stock"].get(product, 0) for m in self.machines(state).values())
+        return max(0, self.p["capacity"] * len(self.p["machines"]) - in_machines)
 
     def collect(self, state: dict, machine: str | None) -> int:
         ids = [machine] if machine else self.machine_ids()
@@ -283,19 +302,39 @@ class Vending(Mechanic):
 class Shelves(Mechanic):
     """Mercado & Go: limited shelf space (brief 14.3).
 
-    The shelves hold a fixed number of items in total. In the morning the player decides
-    how many of each product go on the shelves (sandwiches are made while stocking:
-    one bread and two slices of cheese each). Students only buy what is on the shelves
-    and pay at the register."""
+    The shelves hold a fixed number of items in total. The player puts products from the
+    storage on the shelves (sandwiches are made while stocking: one roll and two slices of
+    cheese each). v10: the shelves can be filled and refilled all day, not only in the
+    morning. Students only buy what is on the shelves and pay at the register."""
 
     service = "checkout"
-    front_fill = "before"
+    front_fill = "anytime"
 
     def front_products(self) -> set[str]:
         return set(CONFIG["shops"][self.shop]["products"])
 
     def front_total_capacity(self) -> int | None:
         return self.p["capacity"]
+
+    def storage_makes(self, state: dict, product: str) -> int:
+        import logic
+
+        uses = CONFIG["products"][product]["uses"]
+        return min(logic.stock_units(state, self.shop, i) // q for i, q in uses.items())
+
+    def objective(self, state: dict, day_state: str) -> str | None:
+        """v10: the steps of the shop in order: storage -> shelves -> prices -> scan."""
+        import logic
+
+        products = CONFIG["shops"][self.shop]["products"]
+        can_fill = [p for p in products if self.storage_makes(state, p) > 0 and logic.front_room(state, self.shop, p) > 0]
+        empty = [p for p in products if logic.front_units(state, self.shop, p) == 0]
+        if day_state == "SET_PRICES" and can_fill and sum(logic.front_units(state, self.shop, p) for p in products) == 0:
+            return "Put the products from the storage on the shelves (walk to a shelf)."
+        if day_state == "SHOP_OPEN" and empty and any(p in can_fill for p in empty):
+            names = ", ".join(CONFIG["products"][p]["name"] for p in empty if p in can_fill)
+            return f"Shelf empty: {names} - refill it from the storage."
+        return self.p.get("objectives", {}).get(day_state)
 
     def view(self, state: dict) -> dict:
         return {"capacity": self.p["capacity"], "fill_until": self.p["fill_until"],

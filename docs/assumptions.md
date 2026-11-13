@@ -132,3 +132,10 @@ Decisions that the brief left open or that came up during implementation. Change
 - Wholesaler layout: one stand per product. A product used by several shops stands with the first shop that needs it (coffee beans with the café, fruit mix with the Bowl Bar).
 - Sound distance: full volume within 8 m, silent from 30 m. Alerts (breakdowns, end of day, purchases) are heard everywhere.
 - Casino bar: drinks €4 to €8, tipsy for 10 game minutes, one at a time. Slot machines: coins €1, €5, €10; return rate about 89 %.
+
+## v10 changes
+- Upgrades: three per shop, themed; prices and bonuses equal the café's tiers (€30 +0.15, €60 +0.20, €100 +0.25). v9 upgrades map to the same tier.
+- Cleaning: every owned shop with staff that was open today; the player cleans the one he ran, managers clean theirs. Missed cleaning costs reputation once per shop that was the player's job. The vending shop has no cleaning.
+- SnackBots manager: plans capacity x machines per product; refilling shares the goods out evenly (emptiest machine first).
+- Mercado & Go: shelves can be filled until closing; the fill_until value is 20:00. A partly sold-out order costs 1 reputation point (inside the daily sold-out cap of 15).
+- Managers wait outside the wholesaler while the player is inside (only shown in the browser; the purchase happens in Python when the proposal is accepted).

@@ -55,9 +55,9 @@ uv run python simulation.py --campaign --seeds 30
 2. At the wholesaler take every product from its stand (one stand per product, grouped by shop; the shopping list is only a reference), then pay at the checkout.
 3. Back in the café: stock the goods, set prices at the counter, then press ⏩ to jump to 08:00 (or open from 07:00).
 4. 08:00-20:00: accept orders, prepare them at the stations, hand them over. Money comes at handover.
-5. 20:00: clean the four spots, read the daily summary (today, stock, competitors, last days), next day.
+5. 20:00: clean the shop you ran (the marker leads you from spot to spot), read the daily summary (today, stock, competitors, last days), next day.
 
-Every shop has its own day plan and upgrade board; they only show that shop.
+Every shop has its own day plan and upgrade board; they only show that shop, and every shop has upgrades that fit it. At the wholesaler the objective leads you from stand to stand along your shopping list, then to the checkout.
 
 Hiring a manager: he starts the next morning (that evening you still clean yourself). He proposes a shopping list and prices (pop-up); after you accept he walks to the wholesaler, takes the products from the stands, pays at the checkout and stocks the shop. He serves all day and cleans his shop after closing.
 
@@ -68,8 +68,8 @@ Nine shops, bought one after another. You can buy the next shop when every shop 
 |---|---|---|---|
 | 1 | Your Café | Campus | Your start: stations, counter, cleaning |
 | 2 | Café da Esquina | Campus | The first competitor |
-| 3 | SnackBots | Campus | Three vending machines spread over the campus: refill them, collect their cash and bring it to the office; machines break down (repair for a fee); the manager does the rounds once hired |
-| 4 | Mercado & Go | Campus | Limited shelf space: fill the shelves in the morning, scan the shopping at the register |
+| 3 | SnackBots | Campus | Three vending machines spread over the campus (customers line up at them): refill them, collect their cash and bring it to the office; machines break down (repair for a fee). A board in the office explains the machine lights. The manager fills every machine in the morning and collects the cash in the evening |
+| 4 | Mercado & Go | Campus | Limited shelf space: put the goods from the storage on the shelves (refill them any time during the day), scan the shopping at the register, clean up after closing |
 | 5 | Bowl Bar | Campus | Put bowls together from ingredients; a wrong mix is a wrong order |
 | 6 | Nova Mensa | Campus | Open 11:30 to 14:30, lunch rush 12:00 to 14:00, queue of 8 |
 | 7 | Surf Shack | Beach | Boards and wetsuits come back after a rental, wetsuits dry; daily wave rating |
@@ -85,6 +85,6 @@ Two secrets are hidden on the campus. We do not spoil where; `specs/v8-fixes-and
 
 ## Documents
 - Product brief v2 (source of truth): `docs/product-brief-v2.md`
-- Task specs: `specs/v9-fixes-and-casino.md` (current), `specs/v8-fixes-and-easter-eggs.md`, `specs/v7-campus-expansion.md`, `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
+- Task specs: `specs/v10-shop-logic.md` (current), `specs/v9-fixes-and-casino.md`, `specs/v8-fixes-and-easter-eggs.md`, `specs/v7-campus-expansion.md`, `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
 - Architecture: `docs/architecture.md`, assumptions: `docs/assumptions.md`
 - Rules for coding agents: `AGENTS.md` (Claude Code reads `CLAUDE.md`, which imports it)
