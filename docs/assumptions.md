@@ -124,3 +124,11 @@ Decisions that the brief left open or that came up during implementation. Change
 - Jep: €10, high for 10 game minutes, one at a time. His look is a neutral, distinctive outfit (bucket hat, sunglasses, flower shirt); we chose not to code him by ethnicity.
 - Casino: European roulette (0 to 36), bets red/black, even/odd (1:1) and dozens (2:1); bets from €10 to €1,000 and never more than your cash. The number is seeded, so tests are repeatable.
 - Jep and casino money count in the day profit and the day gain next to the cash.
+
+## v9 changes
+- Upgrades & staff and the day plan board belong to one shop each. The board of a shop you do not run today shows its plan read-only.
+- Managers of shops with a counter clean after closing. This is shown, it has no rule effect (the café's four cleaning spots stay the only cleaning rule).
+- The managers' wholesaler walk is shown in the browser only; the purchase itself happens in Python when you accept the proposal (as before).
+- Wholesaler layout: one stand per product. A product used by several shops stands with the first shop that needs it (coffee beans with the café, fruit mix with the Bowl Bar).
+- Sound distance: full volume within 8 m, silent from 30 m. Alerts (breakdowns, end of day, purchases) are heard everywhere.
+- Casino bar: drinks €4 to €8, tipsy for 10 game minutes, one at a time. Slot machines: coins €1, €5, €10; return rate about 89 %.

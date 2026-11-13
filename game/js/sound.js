@@ -96,6 +96,7 @@ class Sound {
 
   // ------------------------------------------------------------ building blocks
   tone(freq, delay, dur, type = "sine", vol = 1, out = null, slideTo = null) {
+    out = out || this.bus;
     const c = this.ctx; if (!c) return;
     const t = c.currentTime + delay;
     const o = c.createOscillator(), g = c.createGain();
@@ -117,13 +118,36 @@ class Sound {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.05, dur / 3));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(f); f.connect(g); g.connect(this.sfxGain);
+    src.connect(f); f.connect(g); g.connect(this.bus || this.sfxGain);
     src.start(t); src.stop(t + dur + 0.05);
   }
 
   // ------------------------------------------------------------ effects
-  play(name) {
-    if (!this.ctx || !this.sfxOn) return;
+  // v9: how loud an effect at this spot is for the player: full within 8 m, silent from 30 m,
+  // and nothing from the campus while the player is down in the casino (and the other way round)
+  gainAt(pos) {
+    const g = this.game;
+    if (!pos || !g.player) return 1;
+    const inCasinoSpot = pos.z < -120;
+    if (!!g.inCasino !== inCasinoSpot) return 0;
+    const d = Math.hypot(pos.x - g.player.pos.x, pos.z - g.player.pos.z);
+    return Math.max(0, Math.min(1, 1 - (d - 8) / 22));
+  }
+  playAt(name, pos) { this.play(name, this.gainAt(pos)); }
+  // the middle of a shop's building, for sounds that belong to a shop
+  shopPos(shop) {
+    const b = typeof BUILDINGS !== "undefined" && BUILDINGS[shop];
+    return b ? { x: (b.x0 + b.x1) / 2, z: (b.z0 + b.z1) / 2 } : null;
+  }
+
+  play(name, gain = 1) {
+    if (!this.ctx || !this.sfxOn || gain < 0.03) return;
+    this.bus = null;
+    if (gain < 0.99) { this.bus = this.ctx.createGain(); this.bus.gain.value = gain; this.bus.connect(this.sfxGain); }
+    try { this.effect(name); } finally { this.bus = null; }
+  }
+
+  effect(name) {
     const T = (f, d, len, type, vol, slide) => this.tone(f, d, len, type, vol, null, slide);
     switch (name) {
       case "click": T(880, 0, 0.05, "square", 0.08); break;
@@ -158,6 +182,11 @@ class Sound {
     }
   }
 
+  machinePos(shop, id) {
+    const m = P[shop] && P[shop].machines && P[shop].machines[id];
+    return m ? m.pos : this.shopPos(shop);
+  }
+
   // Every event that went through the bridge: the matching sound (called in Bridge.receive)
   onEvent(ev, r) {
     if (!this.ctx || !this.sfxOn) return;
@@ -166,24 +195,26 @@ class Sound {
       return;
     }
     const res = r.result || {};
+    // v9: sounds of a shop or a machine are only heard near it
+    const spot = ev.machine ? this.machinePos(ev.shop, ev.machine) : ev.shop ? this.shopPos(ev.shop) : null;
+    const play = (name) => this.play(name, spot ? this.gainAt(spot) : 1);
     switch (ev.type) {
-      case "pay": this.play("register"); break;
-      case "stock_goods": case "fill_front": this.play("box"); break;
-      case "prepare": case "assemble": this.play(String(ev.product || "").includes("juice") ? "pour" : "brew"); break;
-      case "handover": case "checkout": this.play("coin"); break;
-      case "auto_serve": if (this.game.flow.playerIn(ev.shop)) this.play("coin"); break;
-      case "clean": this.play("clean"); break;
-      case "open_shop": this.play("door"); break;
-      case "refill_machine": this.play("refill"); break;
-      case "collect_cash": case "deposit_cash": this.play("register"); break;
-      case "repair": this.play("repair"); break;
-      case "set_prices": case "confirm_plan": case "confirm_manager_plan": case "set_happy_hour": this.play("click"); break;
-      case "buy_upgrade": case "hire_manager": this.play("chime"); break;
-      case "buy_shop": case "buy_competitor": this.play("fanfare"); break;
-      case "next_day": this.play("chime"); break;
+      case "pay": play("register"); break;
+      case "stock_goods": case "fill_front": play("box"); break;
+      case "prepare": case "assemble": play(String(ev.product || "").includes("juice") ? "pour" : "brew"); break;
+      case "handover": case "checkout": play("coin"); break;
+      case "auto_serve": if (this.game.flow.playerIn(ev.shop) || ev.machine) play("coin"); break;
+            case "open_shop": play("door"); break;
+      case "refill_machine": play("refill"); break;
+      case "collect_cash": case "deposit_cash": play("register"); break;
+      case "repair": play("repair"); break;
+      case "set_prices": case "confirm_plan": case "confirm_manager_plan": case "set_happy_hour": play("click"); break;
+      case "buy_upgrade": case "hire_manager": play("chime"); break;
+      case "buy_shop": case "buy_competitor": play("fanfare"); break;
+      case "next_day": play("chime"); break;
       case "tick":
-        if ((res.toasts || []).some((t) => t.includes("broken"))) this.play("broken");
-        if (res.summary) this.play("day_end");
+        if ((res.toasts || []).some((t) => t.includes("broken"))) play("broken");
+        if (res.summary) play("day_end");
         break;
       default: break;
     }

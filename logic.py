@@ -65,6 +65,7 @@ def _empty_stats() -> dict:
         "wasted": 0,
         "jep": 0,  # v8: spent at Jep
         "casino": 0,  # v8: won (+) or lost (-) in the casino
+        "bar": 0,  # v9: spent at the casino bar
         # Stock movements per shop and item: opening stock, goods in, used, spoiled
         "flow": {},
     }
@@ -163,6 +164,7 @@ def _start_day(state: dict, day: int) -> dict:
         "zone_news": [],
         "jep": easter_eggs.jep_spot(state["seed"], day),
         "high_until": 0,
+        "drunk_until": 0,
     })
     for shop in SHOP_ORDER:
         if state["shops"][shop].get("sold") and state["shops"][shop]["owner"] == "bot":
@@ -235,6 +237,7 @@ def migrate(state: dict) -> dict:
     state.setdefault("zone_news", [])
     state.setdefault("jep", easter_eggs.jep_spot(state["seed"], state["day"]))  # v8
     state.setdefault("high_until", 0)
+    state.setdefault("drunk_until", 0)  # v9
     if "students" in state:  # v7: the beach visitors exist (but do not come before the beach opens)
         for sid, student in st.make_pool(state["seed"], state["day"]).items():
             if sid not in state["students"]:
@@ -246,6 +249,7 @@ def migrate(state: dict) -> dict:
         stats.setdefault("flow", {})
         stats.setdefault("jep", 0)
         stats.setdefault("casino", 0)
+        stats.setdefault("bar", 0)
         for shop_id in SHOPS:
             stats["shops"].setdefault(shop_id, _empty_stats()["shops"][shop_id])
         for shop_stats in stats["shops"].values():
@@ -789,7 +793,8 @@ def _end_day(state) -> dict:
     revenue = sum(stats["shops"][s]["revenue"] for s in owned_shops(state))
     tips = sum(stats["shops"][s].get("tips", 0) for s in owned_shops(state))
     # v8: Jep and the casino count as well (they move real money)
-    profit = revenue + tips - stats["purchase_cost"] - stats["spending"] - stats.get("jep", 0) + stats.get("casino", 0)
+    profit = (revenue + tips - stats["purchase_cost"] - stats["spending"] - stats.get("jep", 0)
+              + stats.get("casino", 0) - stats.get("bar", 0))
     total_market = revenue + _bot_revenue(state)
     sold: dict[str, int] = {}
     for s in owned_shops(state):
@@ -802,6 +807,7 @@ def _end_day(state) -> dict:
         "spending": stats["spending"],
         "jep": stats.get("jep", 0),
         "casino": stats.get("casino", 0),
+        "bar": stats.get("bar", 0),
         "spoiled_value": spoiled_value,
         "spoiled": spoiled,
         "profit": profit,
@@ -1582,6 +1588,24 @@ def _ev_roulette(state, ev):
     return result
 
 
+def _ev_buy_drink(state, ev):
+    """v9 easter egg: a drink at the casino bar; you are tipsy for a few game minutes."""
+    try:
+        res = easter_eggs.buy_drink(state, ev.get("drink"))
+    except easter_eggs.EasterEggError as error:
+        raise GameError(str(error)) from error
+    spec = easter_eggs.BAR["drinks"][res["drink"]]
+    return {"toast": f"{spec['icon']} {spec['name']} (-{euro(spec['price'])}). Cheers!", "drunk_until": state["drunk_until"]}
+
+
+def _ev_slot(state, ev):
+    """v9 easter egg: one pull of a one-armed bandit."""
+    try:
+        return easter_eggs.pull_slot(state, ev.get("machine"), _whole(ev.get("amount"), "amount"))
+    except easter_eggs.EasterEggError as error:
+        raise GameError(str(error)) from error
+
+
 def _ev_checkout(state, ev):
     """Scan the shopping of the customer at the register (P09 in a self-service shop)."""
     shop = ev.get("shop")
@@ -1639,6 +1663,8 @@ HANDLERS = {
     "buy_from_jep": _ev_buy_from_jep,
     "enter_casino": _ev_enter_casino,
     "roulette": _ev_roulette,
+    "buy_drink": _ev_buy_drink,
+    "slot": _ev_slot,
 }
 
 
@@ -1794,6 +1820,7 @@ def view(state: dict) -> dict:
         # v8 easter eggs
         "jep": state.get("jep"),
         "high_until": state.get("high_until", 0),
+        "drunk_until": state.get("drunk_until", 0),
         "casino": state.get("casino", {"spins": 0, "net": 0}),
         "weather": state.get("weather"),
         "items_available": [i for i in ITEMS if item_available(state, i)],
@@ -1816,11 +1843,12 @@ def _today(state: dict) -> dict:
     shops = owned_shops(state)
     revenue = sum(stats["shops"][s]["revenue"] for s in shops)
     tips = sum(stats["shops"][s].get("tips", 0) for s in shops)
-    gain = revenue + tips - stats["purchase_cost"] - stats["spending"] - stats.get("jep", 0) + stats.get("casino", 0)
+    gain = (revenue + tips - stats["purchase_cost"] - stats["spending"] - stats.get("jep", 0)
+            + stats.get("casino", 0) - stats.get("bar", 0))
     market = revenue + _bot_revenue(state)
     return {
         "revenue": revenue, "tips": tips, "purchase_cost": stats["purchase_cost"], "spending": stats["spending"],
-        "jep": stats.get("jep", 0), "casino": stats.get("casino", 0),
+        "jep": stats.get("jep", 0), "casino": stats.get("casino", 0), "bar": stats.get("bar", 0),
         "gain": gain,
         "served": sum(stats["shops"][s]["served"] for s in shops),
         "lost": sum(stats["shops"][s]["lost"] for s in shops),

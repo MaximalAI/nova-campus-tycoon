@@ -25,6 +25,7 @@ class EasterEggs {
     this.buildJep();
     this.buildEntry();
     this.buildCasino();
+    this.buildCasinoExtras(); // v9: bar with guests, slot machines, chips on the table
     this.buildHighOverlay();
   }
 
@@ -156,30 +157,48 @@ class EasterEggs {
     root.querySelector("#hud").appendChild(this.badge);
   }
 
+  // v9: high (Jep) and tipsy (casino bar) can come together: one filter, one badge
   updateHigh(dt) {
-    const g = this.game, high = this.isHigh() && g.screen === "game";
+    const g = this.game, inGame = g.screen === "game";
+    const high = this.isHigh() && inGame, drunk = this.isDrunk() && inGame;
     const canvas = g.renderer.domElement;
-    const now = performance.now();
-    if (high) {
-      const t = now / 1000;
-      if (!this.wasHigh) { this.showJoint(true); g.player.walkSpeed = 3.3; g.player.runSpeed = 5.6; }
-      canvas.style.filter = `hue-rotate(${Math.round(Math.sin(t * 0.35) * 70)}deg) saturate(${1.5 + Math.sin(t * 0.9) * 0.3})`;
-      this.fx.style.opacity = String(0.35 + Math.sin(t * 1.3) * 0.15);
-      const left = Math.max(1, Math.ceil((this.v.high_until - g.clock.t) * 60));
-      this.badge.innerHTML = `😵‍💫 High · ${left} min`;
-      this.badge.classList.remove("hidden");
-      // a puff every few seconds while the effect lasts
-      if (now > this.smokingUntil && (!this.nextPuff || now > this.nextPuff)) { this.puff(); this.nextPuff = now + 4200; }
-    } else if (this.wasHigh) {
-      canvas.style.filter = ""; this.fx.style.opacity = "0";
-      this.badge.classList.add("hidden");
+    const now = performance.now(), t = now / 1000;
+    if (high && !this.wasHigh) { this.showJoint(true); g.player.walkSpeed = 3.3; g.player.runSpeed = 5.6; }
+    if (!high && this.wasHigh) {
       g.player.walkSpeed = 4.6; g.player.runSpeed = 8.0;
-      g.camera.fov = 58; g.camera.updateProjectionMatrix();
       this.showJoint(false);
       g.ui.toast("The effect is gone. Back to business.");
     }
+    if (!drunk && this.wasDrunk) g.ui.toast("Your head is clear again.");
+    if (high || drunk) {
+      const parts = [];
+      if (high) parts.push(`hue-rotate(${Math.round(Math.sin(t * 0.35) * 70)}deg)`, `saturate(${1.5 + Math.sin(t * 0.9) * 0.3})`);
+      if (drunk) parts.push(`blur(${(1.1 + Math.sin(t * 1.7) * 0.6).toFixed(2)}px)`, "sepia(0.25)");
+      canvas.style.filter = parts.join(" ");
+      this.fx.style.opacity = high ? String(0.35 + Math.sin(t * 1.3) * 0.15) : "0";
+      const lines = [];
+      if (high) lines.push(`😵‍💫 High · ${Math.max(1, Math.ceil((this.v.high_until - g.clock.t) * 60))} min`);
+      if (drunk) lines.push(`🥴 Tipsy · ${Math.max(1, Math.ceil((this.v.drunk_until - g.clock.t) * 60))} min`);
+      this.badge.innerHTML = lines.join("<br>");
+      this.badge.classList.remove("hidden");
+      // a puff every few seconds while high
+      if (high && now > this.smokingUntil && (!this.nextPuff || now > this.nextPuff)) { this.puff(); this.nextPuff = now + 4200; }
+      // tipsy: walking drifts from side to side
+      if (drunk) {
+        const p = g.player, v = p.vel, sp = Math.hypot(v.x, v.z);
+        if (sp > 0.5) {
+          const sway = Math.sin(t * 2.3) * 1.4 * dt;
+          p.pos.x += (-v.z / sp) * sway; p.pos.z += (v.x / sp) * sway;
+          g.world.keepOutOfWalls(p.pos, 0.35);
+        }
+      }
+    } else if (this.wasHigh || this.wasDrunk) {
+      canvas.style.filter = ""; this.fx.style.opacity = "0";
+      this.badge.classList.add("hidden");
+      g.camera.fov = 58; g.camera.updateProjectionMatrix();
+    }
     if (now < this.smokingUntil && now > this.nextPuff) { this.puff(); this.nextPuff = now + 1400; }
-    this.wasHigh = high;
+    this.wasHigh = high; this.wasDrunk = drunk;
   }
 
   // the arm goes to the mouth while puffing (after Figure.animate set the walking pose)
@@ -222,16 +241,24 @@ class EasterEggs {
     this.hatch = hatch;
     w.addInteractable({
       id: "casino_entry", pos: this.entryFront, radius: 1.8, meshes: this.entryMeshes,
-      label: () => (this.found() ? "Climb down the ladder" : "Look at the broken machine"),
+      label: () => (this.slidOpen ? "Climb down the ladder" : this.found() ? "Push the machine aside" : "Look at the broken machine"),
       enabled: () => !!this.v && !this.game.inCasino,
       action: () => this.openEntry(),
+    });
+    // v9: once it is open you can push the machine back over the hatch
+    this.slideFront = { x: this.entrySlide.x + fx * 1.4, z: this.entrySlide.z + fz * 1.4 };
+    w.addInteractable({
+      id: "casino_close", pos: this.slideFront, radius: 1.4, meshes: [],
+      label: () => "Push the machine back", enabled: () => !!this.v && !this.game.inCasino && this.slidOpen,
+      action: () => this.slideClose(),
     });
   }
 
   found() { return !!(this.v && this.v.casino && this.v.casino.found) || this.slidOpen; }
 
   openEntry() {
-    if (this.found()) return this.enterCasino();
+    if (this.slidOpen) return this.enterCasino();
+    if (this.found()) return this.slideOpen();
     this.game.ui.showDialog({
       id: "P41", icon: "🕳️", title: "A broken machine", unique: true,
       text: "The machine is unplugged and stands a bit crooked. When you lean against it, it slides aside: " +
@@ -248,7 +275,30 @@ class EasterEggs {
     const h = this.entryHalf, s = this.entrySlide;
     Object.assign(this.entryCollider, { x0: s.x - h[0], x1: s.x + h[0], z0: s.z - h[1], z1: s.z + h[1] });
     this.hatch.visible = true;
-    this.game.sound.play("box");
+    this.game.sound.playAt("box", this.entryHome);
+  }
+
+  // v9: push the machine back over the hatch, nobody sees the secret any more
+  slideClose() {
+    if (!this.slidOpen) return;
+    const p = this.game.player.pos, e = this.entryHome;
+    if (Math.abs(p.x - e.x) < 0.9 && Math.abs(p.z - e.z) < 0.9) return this.game.ui.toast("Step off the hatch first.");
+    this.slidOpen = false;
+    this.entryMachine.position.set(e.x, 0, e.z);
+    const h = this.entryHalf;
+    Object.assign(this.entryCollider, { x0: e.x - h[0], x1: e.x + h[0], z0: e.z - h[1], z1: e.z + h[1] });
+    this.hatch.visible = false;
+    this.game.sound.playAt("box", e);
+    this.game.ui.toast("You push the machine back. The secret is safe.");
+  }
+
+  // v9: everything of the casino (room, people) is hidden while you are on the campus,
+  // so nobody sees it floating at the edge of the map
+  setCasinoVisible(on) {
+    if (this.casinoShown === on) return;
+    this.casinoShown = on;
+    this.room.visible = on;
+    for (const f of this.casinoPeople) f.group.visible = on;
   }
 
   // ------------------------------------------------------------------ casino room
@@ -276,7 +326,7 @@ class EasterEggs {
       for (const y of [0.9, 4.6]) { const t = new THREE.Mesh(new THREE.BoxGeometry(sx, 0.08, sz), gold); t.position.set(x, y, z); room.add(t); }
     }
     // neon sign
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.1), new THREE.MeshBasicMaterial({ map: w.textTexture("CASINO SUBTERRÂNEO", "#14051f", "#e040fb", 1024, 160, 92) }));
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(10, 1.3), new THREE.MeshBasicMaterial({ map: w.textTexture("CASINO SUBTERRÂNEO", "#14051f", "#e040fb", 1600, 208, 120) })); // v9: wider, the name fits
     sign.position.set(0, 4.0, -R.d / 2 + 0.06); room.add(sign);
     // roulette table with the wheel
     const table = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.9, 2.2), new THREE.MeshLambertMaterial({ color: 0x5d4037 }));
@@ -299,6 +349,7 @@ class EasterEggs {
     const tie = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.03), new THREE.MeshLambertMaterial({ color: 0xb71c1c }));
     tie.position.set(0, 1.3, 0.16); this.croupier.group.add(tie);
     this.croupier.place({ x: R.x, z: R.z - 4.1 });
+    this.casinoPeople = [this.croupier];
     // mystic things: candles, floating orbs, a crystal ball on a side table
     this.orbs = [];
     const orbMat = new THREE.MeshBasicMaterial({ color: 0xce93d8, transparent: true, opacity: 0.8 });
@@ -417,6 +468,214 @@ class EasterEggs {
     this.game.ui.toast(lines[Math.floor(performance.now() / 1000) % lines.length]);
   }
 
+  // ------------------------------------------------------------------ v9: bar, guests, slots
+  buildCasinoExtras() {
+    const w = this.w, R = CASINO_ROOM, room = this.room, scene = w.scene;
+    const X = R.x, Z = R.z;
+    const at = (lx, lz) => ({ x: X + lx, z: Z + lz });
+    const M = (c, extra = {}) => new THREE.MeshLambertMaterial({ color: c, ...extra });
+    const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); room.add(m); return m; };
+    // --- the bar along the east wall
+    add(new THREE.BoxGeometry(1.0, 1.1, 6.0), M(0x4e342e), 8.5, 0.55, 2.0);
+    add(new THREE.BoxGeometry(1.2, 0.08, 6.2), M(0xc9a227, { emissive: 0x3a2a00 }), 8.5, 1.14, 2.0);
+    add(new THREE.BoxGeometry(0.3, 2.2, 6.0), M(0x3e2723), 10.75, 2.2, 2.0); // shelf back
+    for (const y of [1.5, 2.2, 2.9]) add(new THREE.BoxGeometry(0.5, 0.05, 6.0), M(0x5d4037), 10.5, y, 2.0);
+    const bottleColors = [0x2e7d32, 0x8d6e63, 0xb71c1c, 0xffb300, 0x1565c0, 0x6a1b9a];
+    for (let i = 0; i < 24; i++) {
+      const y = [1.5, 2.2, 2.9][i % 3] + 0.2, z = -0.6 + (i % 8) * 0.75;
+      add(new THREE.CylinderGeometry(0.07, 0.08, 0.36, 8), M(bottleColors[i % 6], { transparent: true, opacity: 0.85 }), 10.45, y, z);
+    }
+    add(new THREE.PlaneGeometry(3.4, 0.7), new THREE.MeshBasicMaterial({ map: w.textTexture("BAR DA SORTE", "#14051f", "#ffd54f", 1024, 200, 120) }), 10.55, 3.9, 2.0).rotation.y = -Math.PI / 2;
+    for (const z of [0, 1.5, 3.0, 4.5]) {
+      add(new THREE.CylinderGeometry(0.22, 0.22, 0.06, 12), M(0xb71c1c), 7.4, 0.75, z);
+      add(new THREE.CylinderGeometry(0.04, 0.04, 0.72, 6), M(0x9e9e9e), 7.4, 0.37, z);
+    }
+    w.collide(X + 8.0, X + 9.0, Z - 1.0, Z + 5.0);
+    w.collide(X + 10.4, X + 11.0, Z - 1.0, Z + 5.0);
+    // barkeeper and two guests (they only exist down here)
+    const person = (colors, opts, p, face) => {
+      const f = new Figure(scene, colors, opts); f.place(at(p.x, p.z)); f.face(face); this.casinoPeople.push(f); return f;
+    };
+    this.barkeeper = person({ shirt: 0xffffff, pants: 0x111111, hair: 0x111111, skin: 0xc68642 }, { apron: true }, { x: 9.7, z: 2.0 }, -Math.PI / 2);
+    this.guests = [
+      person({ shirt: 0x8e24aa, pants: 0x263238, hair: 0xd4a017, skin: 0xffdbac }, {}, { x: 7.0, z: 0.0 }, Math.PI / 2),
+      person({ shirt: 0x00897b, pants: 0x3e2723, hair: 0x5a3825, skin: 0xe0ac69 }, {}, { x: 7.0, z: 4.5 }, Math.PI / 2),
+      person({ shirt: 0xf4511e, pants: 0x1a237e, hair: 0x2b1d0e, skin: 0x8d5524 }, {}, { x: 1.9, z: -1.1 }, Math.PI), // watches the roulette
+    ];
+    w.addInteractable({ id: "casino_bar", pos: at(7.2, 2.25), radius: 1.6, meshes: [], priority: 1,
+      label: () => "Order a drink", enabled: () => !!this.game.inCasino, action: () => this.openBar() });
+    // --- three one-armed bandits along the west wall
+    this.slots = {};
+    this.cfg.casino.slots.machines.forEach((id, i) => {
+      const lz = -1.2 + i * 2.4;
+      const grp = new THREE.Group(); grp.position.set(-10.2, 0, lz); grp.rotation.y = Math.PI / 2; room.add(grp);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.9, 0.8), M([0xc62828, 0x1565c0, 0x6a1b9a][i]));
+      body.position.y = 0.95; grp.add(body);
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.35, 0.85), M(0xc9a227, { emissive: 0x3a2a00 })); top.position.y = 2.05; grp.add(top);
+      const canvas = document.createElement("canvas"); canvas.width = 384; canvas.height = 128;
+      const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.3), new THREE.MeshBasicMaterial({ map: tex }));
+      screen.position.set(0, 1.35, 0.41); grp.add(screen);
+      const arm = new THREE.Group(); arm.position.set(0.62, 1.25, 0); grp.add(arm);
+      const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.55, 8), M(0x9e9e9e)); stick.position.y = 0.27; arm.add(stick);
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff1744 })); knob.position.y = 0.56; arm.add(knob);
+      const slot = { id, canvas, tex, arm, reels: ["seven", "seven", "seven"], spinUntil: 0, armT: 0 };
+      this.drawReels(slot, slot.reels);
+      this.slots[id] = slot;
+      w.collide(X - 10.8, X - 9.8, Z + lz - 0.6, Z + lz + 0.6);
+      w.addInteractable({ id: `casino_${id}`, pos: at(-9.0, lz), radius: 1.3, meshes: [], priority: 1,
+        label: () => "Play the slot machine", enabled: () => !!this.game.inCasino, action: () => this.openSlot(id) });
+    });
+    // --- chips on the roulette layout
+    this.chipGroup = new THREE.Group(); room.add(this.chipGroup);
+    this.chipTweens = [];
+  }
+
+  drawReels(slot, reels, spinning = false) {
+    const g = slot.canvas.getContext("2d"), sym = this.cfg.casino.slots.symbols;
+    g.fillStyle = "#111"; g.fillRect(0, 0, 384, 128);
+    for (let i = 0; i < 3; i++) {
+      g.fillStyle = "#fffde7"; g.fillRect(8 + i * 125, 8, 118, 112);
+      g.font = "72px serif"; g.textAlign = "center"; g.textBaseline = "middle";
+      const r = spinning ? Object.keys(sym)[Math.floor(Math.random() * 5)] : reels[i];
+      g.fillText(sym[r].icon, 67 + i * 125, 68);
+    }
+    slot.tex.needsUpdate = true;
+  }
+
+  // the bar (P43): a drink makes you tipsy for a few game minutes
+  openBar() {
+    const v = this.v, bar = this.cfg.casino.bar, drunk = this.isDrunk();
+    this.game.ui.showDialog({
+      id: "P43", icon: "🍸", title: "Bar da Sorte", unique: true,
+      text: drunk ? "Barkeeper: \"I think you had enough for now, my friend.\""
+        : `Barkeeper: "What can I get you?" A drink makes you tipsy for ${bar.drunk_minutes} game minutes.`,
+      rows: [{ label: "Your cash", value: euro(v.money) }],
+      extra: drunk ? [] : Object.entries(bar.drinks).map(([id, d]) => ({
+        label: `${d.icon} ${d.name} (${euro(d.price)})`, cls: "secondary", disabled: v.money < d.price,
+        action: () => { this.game.ui.closeDialog(); this.game.flow.send("buy_drink", { drink: id }, this.game.flow.ok(() => this.startDrinking())); },
+      })),
+      primary: { label: drunk ? "OK" : "Nothing, thanks" },
+    });
+  }
+
+  startDrinking() {
+    this.game.sound.play("pour");
+    this.drinkUntil = performance.now() + 2500;
+    this.game.ui.toast("You empty the glass... the room starts to sway a little.");
+  }
+
+  isDrunk() { return !!(this.v && this.game.clock.t < (this.v.drunk_until || 0)); }
+
+  // one-armed bandit (P44)
+  openSlot(id) {
+    this.slotId = id;
+    this.slotBet = this.slotBet || this.cfg.casino.slots.bets[0];
+    this.game.ui.showDialog({
+      id: "P44", icon: "🎰", title: "One-armed bandit", unique: true,
+      text: "Three equal symbols win, two cherries give your coin back.",
+      body: (b) => this.slotBody(b),
+      secondary: { label: "Leave" },
+      primary: { label: "Pull the lever", disabled: () => this.slotSpinning || !this.v || this.v.money < this.slotBet,
+        action: () => { this.pullSlot(); return "keep"; } },
+    });
+  }
+
+  slotBody(b) {
+    const s = this.cfg.casino.slots, v = this.v;
+    const pay = Object.values(s.symbols).map((x) => `${x.icon}${x.icon}${x.icon} ${x.triple}x`).join(" · ");
+    const bets = s.bets.map((c) => `<button class="rchip ${c === this.slotBet ? "on" : ""}" data-sbet="${c}" ${this.slotSpinning ? "disabled" : ""}>${euro(c).replace(".00", "")}</button>`).join("");
+    const r = this.lastPull;
+    const reels = this.slotSpinning ? '<span class="spin">❔</span>'.repeat(3)
+      : (r ? r.icons : ["7️⃣", "7️⃣", "7️⃣"]).map((i) => `<span>${i}</span>`).join("");
+    const res = this.slotSpinning ? `<div class="rres spin">The reels are spinning...</div>`
+      : r ? `<div class="rres ${r.change > 0 ? "win" : "lose"}">${r.pays ? `x${r.pays}: you get ${euro(r.change + this.lastPullBet)}` : `Nothing this time (-${euro(this.lastPullBet)})`}</div>` : "";
+    b.innerHTML = `<div class="roulette">
+      <div class="reels">${reels}</div>${res}
+      <div class="rrow"><b>Coin</b>${bets}</div>
+      <div class="rrow small">${pay} · 🍒🍒 coin back</div>
+      <div class="rrow small">Cash ${euro(v.money)}</div></div>`;
+    b.querySelectorAll("[data-sbet]").forEach((x) => { x.onclick = () => { this.slotBet = Number(x.dataset.sbet); this.game.sound.play("click"); this.game.ui.refreshDialog(); }; });
+  }
+
+  pullSlot() {
+    if (this.slotSpinning) return;
+    const g = this.game, slot = this.slots[this.slotId], d = g.ui.current, bet = this.slotBet;
+    this.slotSpinning = true; this.lastPull = null;
+    slot.armT = performance.now(); slot.spinUntil = performance.now() + 1800;
+    g.sound.play("spin");
+    g.ui.refreshDialog();
+    const started = performance.now();
+    g.flow.send("slot", { machine: this.slotId, amount: bet }, (r) => {
+      setTimeout(() => {
+        this.slotSpinning = false; slot.spinUntil = 0;
+        if (!r.ok) { g.ui.toast(r.error, true); g.ui.refreshDialog(); return; }
+        this.lastPull = r.result; this.lastPullBet = bet;
+        slot.reels = r.result.reels; this.drawReels(slot, slot.reels);
+        g.sound.play(r.result.change > 0 ? "win" : "lose");
+        if (g.ui.current === d) g.ui.refreshDialog();
+      }, Math.max(0, 1800 - (performance.now() - started)));
+    });
+  }
+
+  updateSlots(dt) {
+    const now = performance.now();
+    for (const s of Object.values(this.slots)) {
+      if (now < s.spinUntil && (!s.nextDraw || now > s.nextDraw)) { this.drawReels(s, s.reels, true); s.nextDraw = now + 80; }
+      const t = (now - s.armT) / 500; // the lever goes down and comes back up
+      s.arm.rotation.x = t >= 0 && t < 1 ? Math.sin(t * Math.PI) * 1.1 : 0;
+    }
+  }
+
+  // --- chips: they drop onto the field you bet on, then go to you or to the croupier
+  fieldPos(bet) {
+    const c = { dozen1: [90, 55], dozen2: [256, 55], dozen3: [422, 55], even: [69, 160], red: [192, 160], black: [315, 160], odd: [440, 160] }[bet];
+    return { x: 0.6 + (c[0] / 512 - 0.5) * 2.3, z: -2.5 + (c[1] / 320 - 0.5) * 1.4 };
+  }
+
+  placeChips(bet, amount) {
+    for (const t of this.chipTweens) this.chipGroup.remove(t.m);
+    this.chipTweens = [];
+    const n = Math.min(6, Math.max(1, Math.round(Math.log10(amount / 100) * 2) + 1));
+    const p = this.fieldPos(bet);
+    const colors = [0xe53935, 0xffffff, 0x1e88e5, 0x43a047, 0xfdd835, 0x212121];
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.025, 14), new THREE.MeshLambertMaterial({ color: colors[i % colors.length], transparent: true }));
+      m.position.set(p.x, 1.35 + i * 0.15, p.z);
+      this.chipGroup.add(m);
+      this.chipTweens.push({ m, y: 0.96 + i * 0.027, phase: "drop", delay: i * 0.08 });
+    }
+  }
+
+  settleChips(won) {
+    for (const t of this.chipTweens) { t.phase = won ? "win" : "lose"; t.age = 0; }
+    if (won) { // the croupier adds the winnings next to the stake
+      const extra = this.chipTweens.map((t) => {
+        const m = t.m.clone(); m.material = t.m.material.clone(); m.position.x += 0.16; this.chipGroup.add(m);
+        return { m, y: t.y, phase: "win", age: -0.4 };
+      });
+      this.chipTweens.push(...extra);
+    }
+  }
+
+  updateChips(dt) {
+    for (const t of this.chipTweens) {
+      if (t.phase === "drop") {
+        if (t.delay > 0) { t.delay -= dt; continue; }
+        t.m.position.y = Math.max(t.y, t.m.position.y - dt * 3);
+      } else {
+        t.age += dt;
+        if (t.age < 0.6) continue; // a short look at the result first
+        const dz = t.phase === "win" ? 1 : -1; // to the player (south) or to the croupier (north)
+        t.m.position.z += dz * dt * 1.2;
+        t.m.material.opacity = Math.max(0, t.m.material.opacity - dt * 0.8);
+      }
+    }
+    const gone = this.chipTweens.filter((t) => t.m.material.opacity <= 0);
+    for (const t of gone) this.chipGroup.remove(t.m);
+    if (gone.length) this.chipTweens = this.chipTweens.filter((t) => t.m.material.opacity > 0);
+  }
+
   // ------------------------------------------------------------------ roulette (P42)
   openRoulette() {
     this.game.ui.showDialog({
@@ -430,7 +689,7 @@ class EasterEggs {
 
   rouletteBody(b) {
     const v = this.v, bets = this.cfg.casino.bets;
-    const chips = this.cfg.casino.chips.map((c) => `<button class="chip ${c === this.chip ? "on" : ""}" data-chip="${c}" ${this.spinning ? "disabled" : ""}>${euro(c).replace(".00", "")}</button>`).join("");
+    const chips = this.cfg.casino.chips.map((c) => `<button class="rchip ${c === this.chip ? "on" : ""}" data-chip="${c}" ${this.spinning ? "disabled" : ""}>${euro(c).replace(".00", "")}</button>`).join("");
     const fields = Object.entries(bets).map(([k, s]) => `<button class="rfield f-${k} ${k === this.bet ? "on" : ""}" data-bet="${k}" ${this.spinning ? "disabled" : ""}>${esc(s.name)}<small>${s.pays}:1</small></button>`).join("");
     const last = this.lastSpin;
     const res = this.spinning ? `<div class="rres spin">The ball is rolling...</div>`
@@ -456,13 +715,15 @@ class EasterEggs {
     g.sound.play("spin");
     const started = performance.now();
     this.wheelSpeed = 9; this.ballSpeed = -13;
+    this.placeChips(this.bet, this.chip); // v9: the stake lands on the table
     g.flow.send("roulette", { bet: this.bet, amount: this.chip }, (r) => {
       const reveal = () => {
         this.spinning = false;
         this.wheelSpeed = 0; this.ballSpeed = 0;
-        if (!r.ok) { g.ui.toast(r.error, true); g.ui.refreshDialog(); return; }
+        if (!r.ok) { this.settleChips(false); g.ui.toast(r.error, true); g.ui.refreshDialog(); return; }
         this.lastSpin = r.result;
         this.landBall(r.result.number);
+        this.settleChips(r.result.won);
         this.history = [r.result, ...this.history].slice(0, 8);
         g.sound.play(r.result.won ? "win" : "lose");
         if (g.ui.current === d) g.ui.refreshDialog();
@@ -491,7 +752,16 @@ class EasterEggs {
     for (const o of this.orbs) o.o.position.y = o.base + Math.sin(t * 1.2 + o.ph) * 0.25;
     this.crystal.material.opacity = 0.55 + Math.sin(t * 2) * 0.2;
     this.croupier.face(Math.atan2(this.game.player.pos.x - CASINO_ROOM.x, this.game.player.pos.z - (CASINO_ROOM.z - 4.1)));
+    this.croupier.work = this.spinning ? "shop" : null; // v9: the croupier works the wheel while it spins
     this.croupier.animate(0);
+    // v9: barkeeper polishes glasses, the guests drink now and then
+    this.barkeeper.work = "clean"; this.barkeeper.animate(0);
+    this.guests.forEach((f, i) => {
+      f.animate(0);
+      if (i < 2 && Math.sin(t * 0.7 + i * 2) > 0.85) { f.armR.rotation.x = -2.3; }
+    });
+    this.updateSlots(dt);
+    this.updateChips(dt);
   }
 
   // ------------------------------------------------------------------ per frame
@@ -505,8 +775,8 @@ class EasterEggs {
       this.jep.animate(0);
       this.jep.group.position.y = Math.abs(Math.sin(performance.now() / 700)) * 0.03; // nods to the music in his head
     }
-    this.hatch.visible = this.found();
-    if (this.found() && !this.slidOpen) this.slideOpen();
+    this.hatch.visible = !!this.slidOpen;
+    this.setCasinoVisible(!!g.inCasino); // v9: the room is only drawn while you are down there
     this.updateArm();
     this.updateHigh(dt);
     this.updateSmoke(dt);
@@ -529,6 +799,11 @@ class EasterEggs {
       g.camera.rotateZ(Math.sin(t * 0.8) * 0.045);
       g.camera.fov = 58 + Math.sin(t * 0.6) * 5;
       g.camera.updateProjectionMatrix();
+    }
+    if (this.isDrunk() && g.screen === "game") {
+      const t = performance.now() / 1000; // v9: tipsy: a slow, wide sway
+      g.camera.rotateZ(Math.sin(t * 0.5) * 0.09);
+      g.camera.position.y += Math.sin(t * 1.1) * 0.15;
     }
     if (g.inCasino) {
       g.sun.intensity = 0.04; g.hemi.intensity = 0.22;

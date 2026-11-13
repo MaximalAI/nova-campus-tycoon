@@ -557,6 +557,29 @@ CONFIG = {
                 "dozen1": {"name": "1-12", "pays": 2}, "dozen2": {"name": "13-24", "pays": 2},
                 "dozen3": {"name": "25-36", "pays": 2},
             },
+            # v9: the bar (drinks make you tipsy for a few game minutes)
+            "bar": {
+                "drunk_minutes": 10,
+                "drinks": {
+                    "beer": {"name": "Beer (Super Bock)", "icon": "🍺", "price": 400},
+                    "caipirinha": {"name": "Caipirinha", "icon": "🍹", "price": 800},
+                    "port": {"name": "Glass of Port", "icon": "🍷", "price": 600},
+                },
+            },
+            # v9: three one-armed bandits. Each reel shows one symbol (weights); three equal
+            # symbols pay "triple" times the bet, two cherries give the bet back. About 89 % comes back.
+            "slots": {
+                "machines": ["slot1", "slot2", "slot3"],
+                "bets": [100, 500, 1_000],
+                "symbols": {
+                    "cherry": {"icon": "🍒", "weight": 35, "triple": 5},
+                    "lemon": {"icon": "🍋", "weight": 25, "triple": 10},
+                    "bell": {"icon": "🔔", "weight": 20, "triple": 20},
+                    "star": {"icon": "⭐", "weight": 13, "triple": 40},
+                    "seven": {"icon": "7️⃣", "weight": 7, "triple": 100},
+                },
+                "cherry_pair_pays": 1,
+            },
         },
     },
 }

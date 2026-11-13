@@ -90,18 +90,40 @@ class Flow {
     return !!v && !v.open && !v.closed && v.shops[shop].owner === "player" && v.shops[shop].operating !== false &&
       (shop === v.work_shop || !!v.shops[shop].manager);
   }
+  // v9: the day plan board of every shop you own can be opened; it shows that shop only
   planBoardLabel(shop) {
     const v = this.v;
     if (!v || v.shops[shop].owner !== "player") return null;
     const p = (v.manager_proposals || {})[shop];
     if (p && !p.done) return "Manager's proposal";
     if (shop === v.work_shop && !v.open && !v.closed) return "Plan your day";
-    return null;
+    return "Day plan";
   }
   usePlanBoard(shop) {
-    const p = (this.v.manager_proposals || {})[shop];
+    const v = this.v;
+    const p = (v.manager_proposals || {})[shop];
     if (p && !p.done) return this.openManagerProposal(shop);
-    return this.openPlanning();
+    if (shop === v.work_shop && !v.open && !v.closed) return this.openPlanning();
+    return this.openPlanInfo(shop);
+  }
+  // read-only: what is planned for this shop today and who runs it
+  openPlanInfo(shop) {
+    const v = this.v, s = v.shops[shop], p = (v.manager_proposals || {})[shop];
+    const prod = (id) => `${this.cfg.products[id].icon} ${esc(this.cfg.products[id].name)}`;
+    let text, rows = [];
+    if (s.manager) {
+      text = "Your manager plans this shop himself.";
+      if (p) rows = Object.entries(p.plan || {}).map(([id, n]) => ({ label: prod(id), value: `${n} portions` }));
+      if (p && p.done) text += p.bought && Object.keys(p.bought).length ? " He bought the supplies this morning." : " He did not need to buy anything today.";
+    } else if (shop === v.work_shop) {
+      text = v.open ? "The shop is open. Today's plan:" : "The day is over. Tomorrow morning you plan again.";
+      rows = Object.entries(v.plan || {}).map(([id, n]) => ({ label: prod(id), value: `${n} portions` }));
+    } else if ((s.opens_day || 1) > v.day) {
+      text = "This shop becomes yours tomorrow morning. Then you can plan its day here.";
+    } else {
+      text = `Today you work in ${esc(this.shopName(v.work_shop || "cafe"))}. Hire a manager there, then you can run this shop.`;
+    }
+    this.game.ui.showDialog({ id: "P02", icon: "📋", title: `Day plan - ${this.shopName(shop)}`, unique: true, text, rows, primary: { label: "Close" } });
   }
   useRegister(shop) {
     if (!this.v.open && !this.v.closed) return this.openPrices(shop);
@@ -702,6 +724,10 @@ class Flow {
 
   // -------------------------------------------------------- P14/P15 closing
   openClosing() {
+    // v9: every other shop with a working manager is cleaned by him too
+    for (const s of this.shopKeys) {
+      if (s !== "cafe" && this.v.shops[s].owner === "player" && this.v.shops[s].manager && this.game.workers[s]) this.startShopCleaning(s);
+    }
     const spots = Object.values(this.cfg.cleaning_spots).map((s) => `• ${s.name}`).join("<br>");
     if (this.v.shops.cafe.manager) {
       // v8: a manager cleans from his first working day on (hired today: you still clean tonight)
@@ -723,6 +749,7 @@ class Flow {
       body: (body) => { const pb = el("div", "progress"); bar = el("div"); pb.appendChild(bar); body.appendChild(pb); },
       primary: { label: "Start", action: () => {
         dlg.busy = true; this.game.ui.primaryButton.disabled = true;
+        this.game.sound.play("clean"); // v9: the sound comes with the work, not after it
         this.progress = { minutes: spec.minutes, done: 0, bar: () => bar, onDone: () => {
           this.send("clean", { spot }, this.ok((res) => { if (res.summary) this.openSummary(); }));
           dlg.busy = false; this.game.ui.closeDialog();
@@ -746,6 +773,19 @@ class Flow {
         { call: () => { if (this.v.day_state === "CLOSING" && !this.v.cleaning[spot]) this.send("clean", { spot }, (r) => { if (r.ok && r.result.summary) this.openSummary(); }); } });
     }
     steps.push({ walk: w.home });
+    w.run(steps, { type: "clean" });
+  }
+
+  // v9: the manager of another shop cleans it after closing: stations, counter, floor.
+  // Only the café has cleaning spots in the rules; here it is the evening routine you see.
+  startShopCleaning(shop) {
+    const w = this.game.workers[shop], pt = P[shop];
+    const steps = [];
+    const clean = (pos, icon, text, minutes) => steps.push({ walk: pos }, { wait: minutes, work: "clean", icon, text });
+    for (const it of this.game.world.interactables.filter((i) => i.id.startsWith(`station_${shop}_`))) clean(it.pos, "🧼", "Cleans the station", 1.5);
+    clean(pt.serve, "🧽", "Wipes the counter", 2);
+    clean(pt.doorIn, "🧹", "Sweeps the floor", 3);
+    steps.push({ walk: w.home }, { face: pt.homeFace });
     w.run(steps, { type: "clean" });
   }
 
@@ -797,6 +837,7 @@ class Flow {
       ["Upgrades & staff", euro(-s.spending)],
       ...(s.jep ? [["🌿 Jep", euro(-s.jep)]] : []), // v8 easter eggs
       ...(s.casino ? [["🎰 Casino", this.signed(s.casino, euro)]] : []),
+      ...(s.bar ? [["🍸 Casino bar", euro(-s.bar)]] : []), // v9
       ["<b>Profit</b>", `<b>${this.signed(s.profit, euro)}</b>`],
       ["Spoiled goods (part of purchases)", euro(s.spoiled_value)],
       ["Cash tonight", euro(s.money)],
@@ -964,6 +1005,7 @@ class Flow {
             ["Sales", euro(t.revenue || 0)], ["Tips", euro(t.tips || 0)], ["Purchases", euro(-(t.purchase_cost || 0))],
             ["Upgrades & staff", euro(-(t.spending || 0))],
             ...(t.jep ? [["🌿 Jep", euro(-t.jep)]] : []), ...(t.casino ? [["🎰 Casino", this.signed(t.casino, euro)]] : []),
+            ...(t.bar ? [["🍸 Casino bar", euro(-t.bar)]] : []),
             ["<b>Day gain</b>", `<b>${this.signed(t.gain || 0, euro)}</b>`], ["Cash", euro(v.money)],
           ])));
           grid.appendChild(el("div", "", `<div class="sum-h">🙋 Customers</div>` + this.table(["", ""], [
@@ -1044,14 +1086,17 @@ class Flow {
   }
 
   // -------------------------------------------------------- P18 upgrades
-  openUpgrades() {
+  // v9: the upgrades and the manager of one shop (the board you stand at); the other shops
+  // have their own boards
+  openUpgrades(only) {
     const ui = this.game.ui;
+    const target = only || this.shopKeys.find((s) => this.playerIn(s)) || this.v.work_shop || "cafe";
     const dlg = {
-      id: "P18", icon: "🛠️", title: "Upgrades & staff", wide: true,
-      text: "Upgrades make your shops more attractive (utility factor). A manager runs a shop on his own from the next day.",
+      id: "P18", icon: "🛠️", title: `Upgrades & staff - ${this.shopName(target)}`, wide: true,
+      text: "Upgrades make this shop more attractive (utility factor). A manager runs it on his own from the next day. Your other shops have their own upgrade boards.",
       body: (body) => {
         const v = this.v;
-        for (const shop of Object.keys(v.shops)) {
+        for (const shop of [target]) {
           if (v.shops[shop].owner !== "player") continue;
           const who = v.shops[shop].manager ? " · manager works here" : v.shops[shop].manager_hired ? " · manager starts tomorrow" : shop === v.work_shop ? " · you work here" : "";
           body.appendChild(el("div", "note", `<b>${esc(this.shopName(shop))}</b> · factor ${v.shops[shop].factor.toFixed(2)}${who}`));
@@ -1069,7 +1114,9 @@ class Flow {
           }
           const line = el("div", "line");
           const cost = this.cfg.shops[shop].manager_cost || this.cfg.manager_cost;
-          const what = "starts tomorrow: shops, sets prices, serves" + (shop === "cafe" ? " and cleans" : "");
+          // v9: every manager with a counter also cleans his shop; the vending manager does the rounds
+          const what = "starts tomorrow: " + (this.cfg.shops[shop].mechanic && this.cfg.shops[shop].mechanic.type === "vending"
+            ? "refills the machines, collects the cash, repairs" : "shops, sets prices, serves and cleans");
           line.appendChild(el("div", "lbl", `<span class="ic">🧑‍🍳</span><div>Manager<div class="sub">${what} · ${euro(cost)}</div></div>`));
           if (v.shops[shop].manager) line.appendChild(el("span", "chip ok", "✔ working"));
           else if (v.shops[shop].manager_hired) line.appendChild(el("span", "chip ok", "✔ starts tomorrow"));
@@ -1127,8 +1174,8 @@ class Flow {
       // v8: music and sound effects can be switched off separately
       body: (b) => {
         b.innerHTML = `<div class="settings">
-          <label class="toggle"><input type="checkbox" data-snd="music" ${g.sound.musicOn ? "checked" : ""}><span>🎵 Background music</span></label>
-          <label class="toggle"><input type="checkbox" data-snd="sfx" ${g.sound.sfxOn ? "checked" : ""}><span>🔊 Sound effects</span></label>
+          <label class="snd-toggle"><input type="checkbox" data-snd="music" ${g.sound.musicOn ? "checked" : ""}><span>🎵 Background music</span></label>
+          <label class="snd-toggle"><input type="checkbox" data-snd="sfx" ${g.sound.sfxOn ? "checked" : ""}><span>🔊 Sound effects</span></label>
         </div>`;
         b.querySelector('[data-snd="music"]').onchange = (e) => { g.sound.unlock(); g.sound.setMusic(e.target.checked); };
         b.querySelector('[data-snd="sfx"]').onchange = (e) => { g.sound.unlock(); g.sound.setSfx(e.target.checked); };
@@ -1181,6 +1228,7 @@ class Flow {
 
   // ---------------------------------------------------------------- students
   resetDay(plan, view) {
+    this.checkoutBy = null; // v9: nobody is at the wholesaler's checkout at the start of a day
     for (const a of this.agents.values()) this.game.scene.remove(a.figure.group);
     this.agents.clear();
     this.queues = Object.fromEntries(this.shopKeys.map((s) => [s, []]));
@@ -1323,6 +1371,9 @@ class Flow {
 
   // v8: after his proposal is confirmed (or at 07:00), a manager walks to the wholesaler,
   // buys the supplies and carries them back to his shop.
+  // v9: after you accept his proposal the manager walks to the wholesaler, takes every
+  // product from its stand, queues for the checkout (one at a time), pays and walks back.
+  // Managers who start at the same time leave a little apart and use other spots at the stands.
   checkSupplyTrips() {
     const v = this.v;
     if (!v || !v.manager_proposals) return;
@@ -1334,16 +1385,47 @@ class Flow {
       if (!w || !w.figure.visible || w.busy) continue;
       this.trips[key] = true;
       if (this.game.clock.t > this.cfg.time.open + 0.5) continue; // too late in the day for a walk
-      const world = this.game.world, pt = P[shop], wd = P.wholesale.doorOut;
-      const go = world.findPath(pt.doorOut, wd), back = world.findPath(wd, pt.doorOut);
-      w.run([
-        { walk: pt.doorIn }, { walk: pt.doorOut }, ...go.map((q) => ({ walk: q })), { walk: wd },
-        { wait: 8, work: "shop", icon: "🛒", text: "Buying supplies" },
-        ...back.map((q) => ({ walk: q })), { walk: pt.doorOut }, { walk: pt.doorIn },
-        { wait: 3, work: "shop", icon: "📦", text: "Stocking the shelves" },
-        { walk: w.home }, { face: pt.homeFace },
-      ], { trip: true });
+      const k = Object.keys(this.trips).filter((t) => t.startsWith(`${v.day}:`)).length - 1; // how many left before him today
+      w.run(this.supplyTripSteps(shop, w, Object.keys(p.bought), k), { trip: true });
     }
+  }
+
+  supplyTripSteps(shop, w, items, k) {
+    const world = this.game.world, pt = P[shop], wd = P.wholesale.doorOut, wi = P.wholesale.doorIn;
+    const LANE_X = 36.0; // the free column between the checkout and the island
+    const off = ((k % 3) - 1) * 0.45; // spread managers over the stands
+    const steps = [];
+    const go = (pos) => steps.push({ walk: pos, direct: true });
+    let cur = { x: wi.x, z: wi.z };
+    const moveTo = (to) => { // inside the hall: along the aisle, through the free column when changing aisles
+      if (Math.abs(cur.z - to.z) > 0.8) { go({ x: LANE_X, z: cur.z }); go({ x: LANE_X, z: to.z }); }
+      go(to); cur = to;
+    };
+    if (k) steps.push({ wait: k * 3 }); // leave a bit after the one before
+    steps.push({ walk: pt.doorIn }, { walk: pt.doorOut });
+    for (const q of world.findPath(pt.doorOut, wd)) go(q);
+    go(wd); go(wi);
+    // the stands, in the order they come along the aisles
+    const stops = items.map((i) => ({ i, f: (world.itemStands[i] || [])[0] })).filter((s) => s.f)
+      .sort((a, b) => (a.f.z - b.f.z) || (a.f.x - b.f.x));
+    for (const { i, f } of stops) {
+      moveTo({ x: f.x + off, z: f.z });
+      steps.push({ face: { x: f.x, z: f.z > 4 ? 9 : f.z < -4 ? -9 : 0 } },
+        { wait: 1.2, work: "shop", icon: this.cfg.wholesale_items[i].icon, text: this.cfg.wholesale_items[i].name });
+    }
+    // checkout: wait in line until it is free, then pay
+    moveTo({ x: 34.6 + k * 0.7, z: 2.3 });
+    steps.push({ until: () => !this.checkoutBy || this.checkoutBy === shop, waiting: { icon: "⏳", text: "Waiting to pay", progress: 0 } },
+      { call: () => { this.checkoutBy = shop; } });
+    go({ x: 32.6, z: 2.3 }); cur = { x: 32.6, z: 2.3 };
+    steps.push({ face: { x: 32, z: 4.8 } }, { wait: 2, work: "shop", icon: "💳", text: "Paying" },
+      { call: () => { if (this.checkoutBy === shop) this.checkoutBy = null; } });
+    go({ x: 30.4, z: 1.2 }); go(wi); go(wd);
+    for (const q of world.findPath(wd, pt.doorOut)) go(q);
+    steps.push({ walk: pt.doorOut }, { walk: pt.doorIn },
+      { wait: 3, work: "shop", icon: "📦", text: "Stocking the shelves" },
+      { walk: w.home }, { face: pt.homeFace });
+    return steps;
   }
 
   updateStudents(dtReal, dtGameMin) {
@@ -1808,7 +1890,7 @@ class Flow {
       extra: [
         ...(v.carried_cash ? [{ label: `Deposit ${euro(v.carried_cash)}`, cls: "secondary", action: () => { this.game.ui.closeDialog(); this.send("deposit_cash", { shop }, this.ok()); } }] : []),
         ...(this.canSetPrices(shop) ? [{ label: "Set prices", cls: "secondary", action: () => { this.game.ui.closeDialog(); this.openPrices(shop); } }] : []),
-        { label: "Upgrades", cls: "secondary", action: () => { this.game.ui.closeDialog(); this.openUpgrades(); } },
+        { label: "Upgrades", cls: "secondary", action: () => { this.game.ui.closeDialog(); this.openUpgrades(shop); } },
       ],
       primary: s.manager_hired ? { label: "Close" } : { label: `Hire manager (${euro(cost)})`, disabled: v.money < cost,
         action: () => this.send("hire_manager", { shop }, this.ok(() => this.checkEnd())) },
@@ -1906,23 +1988,10 @@ class Flow {
   }
 
   // ----------------------------------------------- v7 aisle at the wholesaler (P04 per item)
-  openAisle(shop) {
-    const items = [...new Set(this.cfg.shops[shop].products.flatMap((p) => Object.keys(this.cfg.products[p].uses)))]
-      .filter((i) => this.v.items_available.includes(i));
-    this.game.ui.showDialog({
-      id: "P04", icon: this.cfg.shops[shop].icon || "📦", title: `Aisle: ${this.shopName(shop)}`, unique: true,
-      text: "Pick an item.",
-      body: (body) => {
-        for (const i of items) {
-          const it = this.cfg.wholesale_items[i];
-          const inCart = this.v.cart[i] ? ` · ${this.v.cart[i]} in cart` : "";
-          const b = el("button", "btn secondary", `${it.icon} ${esc(it.name)} <span class="sub">${euro(it.price)} / ${esc(it.unit)}${inCart}</span>`);
-          b.onclick = () => { this.game.ui.closeDialog(); setTimeout(() => this.openItem(i), 0); };
-          body.appendChild(b);
-        }
-      },
-      primary: { label: "Close" },
-    });
+  // v9: a stand of a shop you do not own yet
+  lockedItem(item) {
+    const shops = this.shopKeys.filter((s) => this.cfg.shops[s].products.some((p) => item in this.cfg.products[p].uses));
+    this.game.ui.toast(`${this.cfg.wholesale_items[item].name}: sold once you own ${shops.map((s) => this.shopName(s)).join(" or ")}.`);
   }
   // Teleporting out of the wholesaler (big map) counts as leaving it.
   leftWholesaleByMap() {

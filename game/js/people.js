@@ -318,7 +318,7 @@ class StaffAgent extends StudentAgent {
       const s = this.steps[0];
       if (s.walk) {
         if (dist2(this.pos, s.walk) < 0.05) { this.steps.shift(); continue; }
-        this.walkTo(this.route(this.pos, s.walk));
+        this.walkTo(s.direct ? [s.walk] : this.route(this.pos, s.walk)); // v9: direct legs outside the shop
         this.steps[0] = { arrived: true };
         break;
       }
@@ -330,6 +330,10 @@ class StaffAgent extends StudentAgent {
         dtGameMin = 0;
         // v6: show what the staff member is doing (arms move, icon + progress above the head)
         this.figure.work = s.work || null;
+        // v9: the cleaning sound goes with the animation (a swish every 1.8 s), only heard nearby
+        if (s.work === "clean" && (!this.nextSwish || performance.now() > this.nextSwish)) {
+          this.game.sound.playAt("clean", this.pos); this.nextSwish = performance.now() + 1800;
+        }
         this.activity = s.work ? { icon: s.icon || "⚙️", text: s.text || "", progress: 1 - Math.max(0, this.waitLeft) / s.wait } : null;
         if (this.waitLeft > 0) break;
         this.figure.work = null; this.activity = null;
@@ -337,6 +341,7 @@ class StaffAgent extends StudentAgent {
         continue;
       }
       if (s.call) { this.steps.shift(); s.call(); continue; }
+      if (s.until) { if (s.until()) { this.steps.shift(); this.activity = null; continue; } this.activity = s.waiting || null; break; } // v9: wait for a free checkout
       this.steps.shift();
     }
     this.update(dtScaled);

@@ -147,7 +147,11 @@ class World {
     const c = document.createElement("canvas"); c.width = w; c.height = h;
     const g = c.getContext("2d");
     g.fillStyle = bg; g.fillRect(0, 0, w, h);
-    g.fillStyle = fg; g.font = `900 ${font}px sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
+    // v9: long texts shrink until they fit the sign (they used to be cut off at the edges)
+    let size = font;
+    g.font = `900 ${size}px sans-serif`;
+    while (size > 12 && g.measureText(text).width > w * 0.92) { size -= 2; g.font = `900 ${size}px sans-serif`; }
+    g.fillStyle = fg; g.textAlign = "center"; g.textBaseline = "middle";
     g.fillText(text, w / 2, h / 2 + 4);
     const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
@@ -299,6 +303,12 @@ class World {
       parts.walls.push(m);
       this.collide(a0, a1, b0, b1);
     }
+    // v9: wall above the door (the door used to be open up to the roof above the awning)
+    const doorTop = 2.45, lh = WALL_H - doorTop, dw = door.b - door.a, dm = (door.a + door.b) / 2;
+    const lintel = door.side === "north" || door.side === "south"
+      ? this.box(dw, lh, t, 0, cx + dm, doorTop + lh / 2, door.side === "north" ? z0 : z1, { material: wallMat })
+      : this.box(t, lh, dw, 0, door.side === "west" ? x0 : x1, doorTop + lh / 2, cz + dm, { material: wallMat });
+    parts.walls.push(lintel);
     // Trim stripe and floor
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), this.mat(key === "wholesale" ? 0xc9c3b6 : 0xc89f73));
     floor.rotation.x = -Math.PI / 2; floor.position.set(cx, 0.03, cz); floor.receiveShadow = true; s.add(floor);
@@ -539,7 +549,7 @@ class World {
     this.addInteractable({ id: "plan_board", pos: { x: -37.4, z: -4.9 }, radius: 2.7, meshes: [planBoard], label: () => g.flow.planBoardLabel("cafe"),
       enabled: () => g.flow.planBoardLabel("cafe") !== null, action: () => g.flow.usePlanBoard("cafe") });
     this.addInteractable({ id: "upgrade_board", pos: { x: -31.5, z: -4.9 }, radius: 2.7, meshes: [upBoard], label: () => "Upgrades & staff",
-      action: () => g.flow.openUpgrades() });
+      action: () => g.flow.openUpgrades("cafe") });
     this.addInteractable({ id: "storage_cafe", pos: { x: -38.6, z: 3.6 }, meshes: shelf, label: () => "Stock the goods",
       enabled: () => g.flow.bagHasItemsFor("cafe"), action: () => g.flow.openStock("cafe") });
     // v5: only before opening (prices cannot change during the day)
@@ -595,7 +605,7 @@ class World {
     this.addInteractable({ id: "plan_board_rival", pos: { x: 5.0, z: -18.6 }, radius: 2.4, meshes: [rPlan], label: () => g.flow.planBoardLabel("rival"),
       enabled: () => owned() && g.flow.planBoardLabel("rival") !== null, action: () => g.flow.usePlanBoard("rival") });
     this.addInteractable({ id: "upgrade_board_rival", pos: { x: -5.0, z: -18.6 }, radius: 2.4, meshes: [rUp], label: () => "Upgrades & staff",
-      enabled: owned, action: () => g.flow.openUpgrades() });
+      enabled: owned, action: () => g.flow.openUpgrades("rival") });
     this.addInteractable({ id: "storage_rival", pos: { x: 4.2, z: -25.5 }, meshes: shelf, label: () => "Stock the goods",
       enabled: () => owned() && g.flow.bagHasItemsFor("rival"), action: () => g.flow.openStock("rival") });
     this.addInteractable({ id: "station_rival_coffee", pos: { x: -3.4, z: -25.1 }, meshes: coffee, label: () => "Make a coffee",
@@ -647,14 +657,28 @@ class World {
     const gate = this.box(5.0, 1.2, 0.12, 0xc0392b, 0, 0.6, fenceZ);
     this.gates.beach = { x0: -2.6, x1: 2.6, z0: fenceZ - 0.2, z1: fenceZ + 0.2, active: true, mesh: gate };
     this.colliders.push(this.gates.beach);
-    const signTex = this.textTexture("BEACH: OPENS WHEN THE CAMPUS IS YOURS", "#c0392b", "#ffffff", 1024, 128, 46);
-    // v8: one sign per side, so the text reads correctly from the campus and from the beach
+    // v9: a big two-line sign on two posts, readable from far away (v8: one small line)
+    const c = document.createElement("canvas"); c.width = 1024; c.height = 320;
+    const cg = c.getContext("2d");
+    cg.fillStyle = "#c0392b"; cg.fillRect(0, 0, 1024, 320);
+    cg.strokeStyle = "#ffffff"; cg.lineWidth = 12; cg.strokeRect(14, 14, 996, 292);
+    cg.fillStyle = "#ffffff"; cg.textAlign = "center"; cg.textBaseline = "middle";
+    cg.font = "900 120px sans-serif"; cg.fillText("🏖️ BEACH", 512, 112);
+    cg.font = "800 54px sans-serif"; cg.fillText("opens when the campus is yours", 512, 232);
+    const signTex = new THREE.CanvasTexture(c); signTex.colorSpace = THREE.SRGBColorSpace;
+    // one face per side, so the text reads correctly from the campus and from the beach
     const sign = new THREE.Group();
     for (const [z, rot] of [[-0.08, Math.PI], [0.08, 0]]) {
-      const face = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 0.65), new THREE.MeshBasicMaterial({ map: signTex }));
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 1.75), new THREE.MeshBasicMaterial({ map: signTex }));
       face.position.set(0, 0, z); face.rotation.y = rot; sign.add(face);
     }
-    sign.position.set(0, 1.75, fenceZ); s.add(sign);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(5.7, 1.85, 0.12), this.mat(0x8d6e63));
+    sign.add(back);
+    for (const px of [-2.6, 2.6]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 2.6, 0.14), this.mat(0x6d4c41));
+      post.position.set(px, -1.3 + 0.05, 0); sign.add(post);
+    }
+    sign.position.set(0, 2.5, fenceZ + 0.25); s.add(sign);
     this.gates.beach.sign = sign;
     // forecast board on the promenade (P30)
     const board = this.board("SURF & SUN", 4.5, 79.6, Math.PI, "#00838f");
@@ -791,18 +815,18 @@ class World {
       const up = this.board("UPGRADES", 0, 0, 0, "#e76f51");
       place(up, 2.4, -(W / 2 - 0.08), f.faceLat(1));
       this.addInteractable({ id: `upgrade_board_${key}`, pos: pt.upBoard, radius: 2.4, meshes: [up], label: () => "Upgrades & staff",
-        enabled: owned, action: () => g.flow.openUpgrades() });
+        enabled: owned, action: () => g.flow.openUpgrades(key) });
     }
     const plan = this.board("DAY PLAN", 0, 0, 0, "#2a9d8f");
     place(plan, 2.4, W / 2 - 0.08, f.faceLat(-1));
     this.addInteractable({ id: `plan_board_${key}`, pos: pt.planBoard, radius: 2.4, meshes: [plan], label: () => g.flow.planBoardLabel(key),
       enabled: () => owned() && g.flow.planBoardLabel(key) !== null, action: () => g.flow.usePlanBoard(key) });
     const sp = pt.storage;
-    const vend = b.interior === "vending";
+    const vend = b.interior === "vending" || b.interior === "office"; // v9: the office shelf stands along the side wall too
     const shelf = this.storageShelf(key, sp.x, sp.z, vend ? f.faceLat(-1) : f.faceDoor, items);
     const sr = vend ? f.rect(D - 3.9, D - 1.7, W / 2 - 0.6, W / 2) : f.rect(D - 1.3, D, W / 2 - 2.9, W / 2 - 0.7);
     this.collide(sr.x0, sr.x1, sr.z0, sr.z1);
-    this.addInteractable({ id: `storage_${key}`, pos: b.interior === "vending" ? at(D - 2.8, W / 2 - 2.0) : at(D - 1.9, W / 2 - 1.8), meshes: shelf,
+    this.addInteractable({ id: `storage_${key}`, pos: vend ? at(D - 2.8, W / 2 - 2.0) : at(D - 1.9, W / 2 - 1.8), meshes: shelf,
       label: () => "Stock the goods", enabled: () => owned() && g.flow.bagHasItemsFor(key), action: () => g.flow.openStock(key) });
     pt.stationAt = stationAt;
   }
@@ -905,43 +929,36 @@ class World {
   // v7: zones that are not open yet are hidden on the maps (beach)
   zoneVisible(zone) { return !zone || zone === "campus" || !!(this.game.view && this.game.view.zones_open.includes(zone)); }
 
+  // v9: one stand per product, grouped by shop with a sign above each group. Two rows along
+  // the walls and an island in the middle that you can reach from both sides. Every base
+  // product of every shop is here; the ones of shops you do not own yet are locked.
   buildWholesaleInterior() {
-    const g = this.game;
-    const stands = { coffee_beans: [32.5, -6.6], oranges: [37, -6.6], nata: [41.5, -6.6], tea_leaves: [35, 6.6], croissant_dough: [40, 6.6] };
-    // v7: one aisle per new shop (its items are sold once you own the shop)
-    const aisleSpots = [[46, -6.6], [50.5, -6.6], [44.5, 6.6], [49, 6.6], [37.5, 0], [42, 0], [46.5, 0]];
-    this.newShops.forEach((shop, k) => {
-      const [x, z] = aisleSpots[k];
-      const spec = g.config.shops[shop];
-      const face = z > 0 ? -1 : 1; // the side customers stand on
-      const table = this.box(2.6, 0.9, 1.2, 0x8d99ae, x, 0.45, z);
-      const crates = [];
-      for (let i = 0; i < 3; i++) crates.push(this.box(0.7, 0.45, 0.7, 0xd4a373, x - 0.8 + i * 0.8, 1.13, z));
-      const pic = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), new THREE.MeshBasicMaterial({ map: this.emojiTexture(spec.icon, 128), transparent: true }));
-      pic.position.set(x, 2.1, z + face * 0.65); if (face < 0) pic.rotation.y = Math.PI; this.scene.add(pic);
-      const label = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.42),
-        new THREE.MeshBasicMaterial({ map: this.textTexture(spec.name, "#3d5a80", "#fff", 512, 96, 50) }));
-      label.position.set(x, 1.45, z + face * 0.62); if (face < 0) label.rotation.y = Math.PI; this.scene.add(label);
-      this.collide(x - 1.3, x + 1.3, z - 0.6, z + 0.6);
-      this.addInteractable({ id: "aisle_" + shop, pos: { x, z: z + face * 1.5 }, meshes: [table, ...crates],
-        label: () => `${spec.name} supplies`, enabled: () => g.view && g.view.shops[shop].owner === "player",
-        action: () => g.flow.openAisle(shop) });
-    });
-    for (const [item, [x, z]] of Object.entries(stands)) {
-      const spec = g.config.wholesale_items[item];
-      const table = this.box(2.6, 0.9, 1.2, 0xa98467, x, 0.45, z);
-      const crates = [];
-      for (let i = 0; i < 3; i++) crates.push(this.box(0.7, 0.45, 0.7, 0xd4a373, x - 0.8 + i * 0.8, 1.13, z));
-      const tex = this.emojiTexture(spec.icon, 128);
-      const pic = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
-      pic.position.set(x, 2.1, z + (z < 0 ? 0.65 : -0.65)); if (z > 0) pic.rotation.y = Math.PI; this.scene.add(pic);
-      const label = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.42),
-        new THREE.MeshBasicMaterial({ map: this.textTexture(spec.name, "#52796f", "#fff", 512, 96, 54) }));
-      label.position.set(x, 1.45, z + (z < 0 ? 0.62 : -0.62)); if (z > 0) label.rotation.y = Math.PI; this.scene.add(label);
-      this.collide(x - 1.3, x + 1.3, z - 0.6, z + 0.6);
-      this.addInteractable({ id: "stand_" + item, pos: { x, z: z + (z < 0 ? 1.5 : -1.5) }, meshes: [table, ...crates],
-        label: () => spec.name, enabled: () => g.view && g.view.items_available.includes(item),
-        action: () => g.flow.openItem(item) });
+    const g = this.game, cfg = g.config;
+    const rows = {
+      north: { z: -8.1, face: 1, x0: 31.0, shops: ["cafe", "rival", "snackbots", "mercado"] },
+      south: { z: 8.1, face: -1, x0: 36.0, shops: ["bowl_bar", "mensa", "gelado"] },
+      island: { z: 0, face: 0, x0: 38.5, shops: ["praia_bar", "surf_shack"] },
+    };
+    const known = new Set(Object.values(rows).flatMap((r) => r.shops));
+    for (const shop of Object.keys(cfg.shops)) if (!known.has(shop)) rows.island.shops.push(shop); // future shops
+    const placed = new Set();
+    this.itemStands = {};
+    const SLOT = 1.3, GAP = 0.6;
+    for (const row of Object.values(rows)) {
+      let x = row.x0;
+      for (const shop of row.shops) {
+        if (!cfg.shops[shop]) continue;
+        const items = [...new Set(cfg.shops[shop].products.flatMap((p) => Object.keys(cfg.products[p].uses)))].filter((i) => !placed.has(i));
+        if (!items.length) continue;
+        const gx0 = x;
+        items.forEach((item) => { this.wholesaleStand(item, x + SLOT / 2, row); placed.add(item); x += SLOT; });
+        this.wholesaleSign(shop, (gx0 + x) / 2, x - gx0, row);
+        x += GAP;
+      }
+      // one collider per row (tables against the wall, the island in the middle)
+      if (row.face > 0) this.collide(row.x0 - 0.1, x - GAP + 0.1, -8.9, -7.55);
+      else if (row.face < 0) this.collide(row.x0 - 0.1, x - GAP + 0.1, 7.55, 8.9);
+      else this.collide(row.x0 - 0.1, x - GAP + 0.1, -0.6, 0.6);
     }
     // Checkout with cashier
     const desk = this.box(2.4, 1.0, 0.9, 0x354f52, 32, 0.5, 3.6);
@@ -952,6 +969,64 @@ class World {
     // Gate in the door: closed until the player enters via P03, and while unpaid goods are in the cart
     this.gates.wholesale = { x0: 27.75, x1: 28.25, z0: -1.8, z1: 1.8, active: true };
     this.colliders.push(this.gates.wholesale);
+  }
+
+  itemColor(item) {
+    return { coffee_beans: 0x6f4e37, oranges: 0xff9f1c, nata: 0xf4c95d, tea_leaves: 0x6a994e, croissant_dough: 0xe9b872,
+      water: 0x81d4fa, coke_zero: 0x212121, protein_bars: 0x8d6e63, bread: 0xd7a86e, cheese: 0xffd54f, iced_tea: 0xffb74d,
+      apples: 0xe53935, rice: 0xfafafa, salmon: 0xff8a65, acai: 0x6a1b9a, fruit_mix: 0xef5350, chicken: 0xc68642,
+      fries: 0xffca28, frozen_pizza: 0xff7043, pudding_cups: 0xffe082, draught_beer: 0xffc107, red_wine: 0x880e4f,
+      burger_patties: 0x795548, surfboard: 0x29b6f6, wetsuit: 0x263238, surf_instructor: 0x26a69a, ice_cream: 0xf8bbd0,
+      ice_lollies: 0xff7043 }[item] || 0xcccccc;
+  }
+
+  // one product stand: table, crates, the product's icon and name facing the aisle (both sides on the island)
+  wholesaleStand(item, x, row) {
+    const g = this.game, spec = g.config.wholesale_items[item];
+    const depth = row.face === 0 ? 1.2 : 1.0;
+    const z = row.face > 0 ? -8.1 : row.face < 0 ? 8.1 : 0;
+    const table = this.box(1.2, 0.9, depth, 0xa98467, x, 0.45, z);
+    const crates = [];
+    for (const dx of [-0.28, 0.28]) {
+      const c = this.box(0.5, 0.36, 0.5, 0xd4a373, x + dx, 1.08, z);
+      this.box(0.44, 0.05, 0.44, this.itemColor(item), x + dx, 1.28, z, { cast: false });
+      crates.push(c);
+    }
+    const sides = row.face === 0 ? [1, -1] : [row.face];
+    const fronts = [];
+    const locked = () => !(g.view && g.view.items_available.includes(item));
+    for (const f of sides) {
+      const fz = z + f * (depth / 2 + 0.02);
+      const pic = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.6), new THREE.MeshBasicMaterial({ map: this.emojiTexture(spec.icon, 128), transparent: true }));
+      pic.position.set(x, 1.85, z + f * 0.05); if (f < 0) pic.rotation.y = Math.PI; this.scene.add(pic);
+      const label = new THREE.Mesh(new THREE.PlaneGeometry(1.16, 0.3),
+        new THREE.MeshBasicMaterial({ map: this.textTexture(spec.name, "#52796f", "#fff", 512, 132, 56) }));
+      label.position.set(x, 0.7, fz); if (f < 0) label.rotation.y = Math.PI; this.scene.add(label);
+      const front = { x, z: z + f * (depth / 2 + 1.0) };
+      fronts.push(front);
+      this.addInteractable({ id: `stand_${item}${f < 0 && row.face === 0 ? "_b" : ""}`, pos: front, radius: 1.3, meshes: [table, ...crates],
+        label: () => (locked() ? `${spec.name} 🔒` : spec.name), enabled: () => !!g.view,
+        action: () => (locked() ? g.flow.lockedItem(item) : g.flow.openItem(item)) });
+    }
+    this.itemStands[item] = fronts;
+  }
+
+  // the sign above a group of stands: the shop the products are for
+  wholesaleSign(shop, x, width, row) {
+    const spec = this.game.config.shops[shop];
+    const tex = this.textTexture(`${spec.icon} ${spec.name}`, "#3d5a80", "#ffffff", 1024, 150, 88);
+    const w = Math.max(2.4, width - 0.2);
+    if (row.face === 0) {
+      this.box(0.1, 2.25, 0.1, 0x555555, x, 1.12, 0);
+      for (const f of [1, -1]) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.5), new THREE.MeshBasicMaterial({ map: tex }));
+        m.position.set(x, 2.5, f * 0.07); if (f < 0) m.rotation.y = Math.PI; this.scene.add(m);
+      }
+      this.box(w, 0.54, 0.1, 0x3d5a80, x, 2.5, 0, { cast: false });
+    } else {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.5), new THREE.MeshBasicMaterial({ map: tex }));
+      m.position.set(x, 2.4, row.face > 0 ? -8.68 : 8.68); if (row.face < 0) m.rotation.y = Math.PI; this.scene.add(m);
+    }
   }
 
   tree(x, z) {
@@ -965,7 +1040,15 @@ class World {
     const g = new THREE.Group();
     const seat = new THREE.Mesh(new THREE.BoxGeometry(2, 0.12, 0.5), this.mat(0x9c6644)); seat.position.y = 0.45; seat.castShadow = true;
     const back = new THREE.Mesh(new THREE.BoxGeometry(2, 0.45, 0.1), this.mat(0x9c6644)); back.position.set(0, 0.75, -0.22); back.castShadow = true;
-    g.add(seat, back); g.position.set(x, 0, z); g.rotation.y = r; this.scene.add(g);
+    g.add(seat, back);
+    // v9: legs and back posts, so the bench stands on the ground
+    const metal = this.mat(0x3a3a3a);
+    for (const lx of [-0.85, 0.85]) {
+      for (const lz of [-0.18, 0.18]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.39, 0.07), metal); leg.position.set(lx, 0.195, lz); g.add(leg);
+      }
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.4, 0.06), metal); post.position.set(lx, 0.6, -0.22); g.add(post);
+    } g.position.set(x, 0, z); g.rotation.y = r; this.scene.add(g);
   }
 
   lamp(x, z) {

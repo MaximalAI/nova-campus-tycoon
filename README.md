@@ -51,14 +51,15 @@ uv run python simulation.py --campaign --seeds 30
 | New game | Pause (P) → 🔄 New game |
 
 ## How a day works
-1. 05:00 planning board: decide what to sell, the shopping list is created.
-2. Walk to the wholesaler, fill the cart, pay at the checkout.
-2. At the wholesaler take every product from its stand (the shopping list is only a reference), then pay at the checkout.
+1. 05:00 planning board of the shop you run: decide what to sell, the shopping list is created.
+2. At the wholesaler take every product from its stand (one stand per product, grouped by shop; the shopping list is only a reference), then pay at the checkout.
 3. Back in the café: stock the goods, set prices at the counter, then press ⏩ to jump to 08:00 (or open from 07:00).
 4. 08:00-20:00: accept orders, prepare them at the stations, hand them over. Money comes at handover.
-5. 20:00: clean the four spots, read the daily summary (today, stock, competitor, last days), next day.
+5. 20:00: clean the four spots, read the daily summary (today, stock, competitors, last days), next day.
 
-Hiring a manager: he starts the next morning (that evening you still clean yourself), proposes a shopping list and prices (pop-up), buys, serves, walks to the stations and cleans up after closing.
+Every shop has its own day plan and upgrade board; they only show that shop.
+
+Hiring a manager: he starts the next morning (that evening you still clean yourself). He proposes a shopping list and prices (pop-up); after you accept he walks to the wholesaler, takes the products from the stands, pays at the checkout and stocks the shop. He serves all day and cleans his shop after closing.
 
 ## The monopoly race (v7)
 Nine shops, bought one after another. You can buy the next shop when every shop you own has a hired manager. A bought shop becomes yours the next morning; you run it yourself until you hire its manager. The HUD bar "Monopoly 3/9" shows how far you are (click it for details).
@@ -80,10 +81,10 @@ The beach (south of the campus) opens once every campus shop is yours. You win w
 The game is saved after every action and every few seconds, and also when the tab is hidden or closed. The database runs in a crash-safe mode with a backup copy of the last good save, so a crash, a closed laptop or an empty battery costs you at most a few seconds. "Continue" on the start screen brings you back.
 
 ## Easter eggs (v8)
-Two secrets are hidden on the campus. We do not spoil where; `specs/v8-fixes-and-easter-eggs.md` explains them for the graders.
+Two secrets are hidden on the campus. We do not spoil where; `specs/v8-fixes-and-easter-eggs.md` and `specs/v9-fixes-and-casino.md` explain them for the graders.
 
 ## Documents
 - Product brief v2 (source of truth): `docs/product-brief-v2.md`
-- Task specs: `specs/v8-fixes-and-easter-eggs.md` (current), `specs/v7-campus-expansion.md`, `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
+- Task specs: `specs/v9-fixes-and-casino.md` (current), `specs/v8-fixes-and-easter-eggs.md`, `specs/v7-campus-expansion.md`, `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
 - Architecture: `docs/architecture.md`, assumptions: `docs/assumptions.md`
 - Rules for coding agents: `AGENTS.md` (Claude Code reads `CLAUDE.md`, which imports it)
