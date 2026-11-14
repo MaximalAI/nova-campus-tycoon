@@ -29,3 +29,8 @@ Only presentation: positions, walking paths, animation, the camera, the HUD, tim
 | `db.py` | SQLite storage |
 | `simulation.py` | Headless day driver for tests and balancing |
 | `game/` | Three.js game: `game.html`, `game.css`, `js/core.js`, `world.js`, `people.js`, `ui.js`, `flow.js`, `main.js` |
+
+## Accounts (v12)
+- `auth.py`: e-mail and password rules, password hashing (PBKDF2), login tokens. No game rules.
+- `db.py`: tables `users` (unique e-mail) and `sessions` (token hashes), `saves.user_id`.
+- `app.py`: the browser sends `auth_register`, `auth_login`, `auth_token` (login kept in the browser) and `auth_logout` as events. Without a login the payload's `screen` is `landing`, then `title`, then `game`.

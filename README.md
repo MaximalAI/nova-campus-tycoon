@@ -2,7 +2,7 @@
 
 A 3D café management game on a university campus. Plan your day, shop at the wholesaler, set prices, serve students at the counter, upgrade your café, hire a manager and buy out the competition shop by shop until you own every shop on campus and at Carcavelos beach (v7: the monopoly race over nine shops).
 
-**Deployed app:** <https://DEPLOYED-URL-GOES-HERE.streamlit.app> *(placeholder: replace with the Streamlit Community Cloud URL after deploying)*
+**Deployed app:** <https://www.novacampustycoon.com> (hosted on Render, see "Deployment" below). Create an account with your e-mail address on the landing page, then play; every account has its own saved game.
 
 Course project for *Introduction to Programming*, Nova SBE.
 
@@ -21,6 +21,15 @@ uv sync
 uv run streamlit run app.py
 ```
 The game opens in the browser (full window). It needs an internet connection because Three.js is loaded from a CDN.
+
+Locally the first account you create keeps the games you saved before v12 (they had no account yet).
+
+## Deployment (Render)
+- Web service on Render, Python runtime, branch of the current version (v12).
+- Build command: `uv sync --frozen && uv cache prune --ci`
+- Start command: `uv run streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true`
+- A persistent disk mounted at `/var/data` and the environment variable `NCT_DB_PATH=/var/data/game.db`, so accounts and saved games survive deploys and restarts.
+- Domain `www.novacampustycoon.com` (Namecheap DNS: `A @ 216.24.57.1`, `CNAME www nova-campus-tycoon.onrender.com`); `novacampustycoon.com` redirects to it.
 
 ## Run the tests
 ```bash
@@ -85,6 +94,6 @@ Two secrets are hidden on the campus. We do not spoil where; `specs/v8-fixes-and
 
 ## Documents
 - Product brief v2 (source of truth): `docs/product-brief-v2.md`
-- Task specs: `specs/v11-managers-map-and-summary.md` (current), `specs/v10-shop-logic.md`, `specs/v9-fixes-and-casino.md`, `specs/v8-fixes-and-easter-eggs.md`, `specs/v7-campus-expansion.md`, `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
+- Task specs: `specs/v12-landing-page-and-accounts.md` (current), `specs/v11-managers-map-and-summary.md`, `specs/v10-shop-logic.md`, `specs/v9-fixes-and-casino.md`, `specs/v8-fixes-and-easter-eggs.md`, `specs/v7-campus-expansion.md`, `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
 - Architecture: `docs/architecture.md`, assumptions: `docs/assumptions.md`
 - Rules for coding agents: `AGENTS.md` (Claude Code reads `CLAUDE.md`, which imports it)

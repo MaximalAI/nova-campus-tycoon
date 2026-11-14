@@ -293,3 +293,25 @@ button.chip.toggle:disabled { opacity: .45; cursor: default; }
 .reels span { display: grid; place-items: center; width: 72px; height: 72px; font-size: 42px; background: #fffde7; border: 3px solid #c9a227; border-radius: 10px; }
 .reels span.spin { animation: reelspin .15s linear infinite; color: #6a1b9a; }
 @keyframes reelspin { 0% { transform: translateY(-6px); } 50% { transform: translateY(6px); } 100% { transform: translateY(-6px); } }
+
+/* v12: landing page with login and account creation ---------------------------- */
+#dialog.landing { width: min(860px, 94vw); }
+#dialog.landing .title-logo { font-size: 46px; padding-top: 24px; }
+.landing-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 10px 22px 4px; }
+.landing-card { background: #fff; border: 2px solid #eadfcc; border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; color: var(--ink); }
+.landing-card .lc-icon { font-size: 26px; }
+.landing-card span { font-size: 13px; color: #6b5a47; line-height: 1.35; }
+.auth-card { margin: 14px auto 4px; width: min(420px, 100%); background: #fff; border: 2px solid #eadfcc; border-radius: 18px; padding: 14px 18px; color: var(--ink); }
+.auth-tabs { display: flex; gap: 6px; margin-bottom: 10px; background: #f3eadb; border-radius: 12px; padding: 4px; }
+.auth-tab { flex: 1; border: 0; border-radius: 9px; padding: 8px 6px; font: inherit; font-weight: 800; background: transparent; color: #6b5a47; cursor: pointer; }
+.auth-tab.active { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.auth-field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; font-weight: 800; font-size: 13px; color: #6b5a47; }
+.auth-field input { font: inherit; font-size: 15px; font-weight: 600; color: var(--ink); background: var(--cream); border: 2px solid #eadfcc; border-radius: 10px; padding: 9px 11px; outline: none; }
+.auth-field input:focus { border-color: var(--green); }
+.auth-note { font-size: 12px; color: #7a6650; margin-top: 6px; }
+.auth-error { margin-top: 8px; background: #fde8e4; color: #a33222; border-radius: 10px; padding: 8px 10px; font-weight: 800; font-size: 13px; }
+.landing-foot { text-align: center; font-size: 12px; color: #9a8670; padding: 8px 0 0; }
+.account-line { text-align: center; font-weight: 800; color: #6b5a47; margin: 2px 0; }
+@media (max-width: 720px) { .landing-cards { grid-template-columns: 1fr; } #dialog.landing .title-logo { font-size: 34px; } }
+#dialog.landing .dlg-buttons { justify-content: center; }
+#dialog.landing .dlg-buttons .btn.primary { min-width: 220px; }

@@ -218,6 +218,28 @@ class Game {
     return !!(v && v.open && v.shops[shop].owner === "player" && !v.shops[shop].auto);
   }
   setSpeed(s) { if (this.config.time.speeds.includes(s)) this.clock.speed = s; this.ui.updateHud(); }
+  // v12: the landing page; a login kept in this browser signs in by itself
+  openLanding() {
+    const token = this.savedToken();
+    if (!this.triedToken && token) {
+      this.triedToken = true;
+      this.flow.showLanding({ busy: true });
+      this.bridge.send("auth_token", { token }, (r) => {
+        if (!r.ok) { this.saveToken(null); this.flow.showLanding({ error: r.error }); }
+      });
+      return;
+    }
+    this.flow.showLanding({});
+  }
+  savedToken() { try { return window.localStorage.getItem("nct_token"); } catch (e) { return null; } }
+  saveToken(token) {
+    try { if (token) window.localStorage.setItem("nct_token", token); else window.localStorage.removeItem("nct_token"); } catch (e) { /* private mode */ }
+  }
+  logout() {
+    this.saveToken(null);
+    this.ui.queue = []; if (this.ui.current) { this.ui.current.busy = false; this.ui.closeDialog(); }
+    this.bridge.send("auth_logout", {}, () => {});
+  }
   startSession(kind) {
     this.ui.queue = []; if (this.ui.current) { this.ui.current.busy = false; this.ui.closeDialog(); }
     this.bridge.send(kind, {}, () => {});
@@ -238,18 +260,20 @@ class Game {
     if (!this.renderer) { this.lighting = data.lighting; this.init(data.config); }
     this.lighting = data.lighting;
     this.titleInfo = { hasSave: data.has_save, info: data.save_info };
+    this.user = data.user; // v12: the account that is logged in (null: landing page)
     const prevView = this.view;
     if (data.view) this.view = data.view;
     const sessionChanged = data.session !== this.session;
     this.session = data.session;
     if (sessionChanged || data.screen !== this.screen) {
       this.screen = data.screen;
-      if (data.screen === "title") {
+      if (data.screen === "title" || data.screen === "landing") {
         this.view = null; this.planDay = null;
         this.flow.resetDay({ schedule: {} }, { time: 5, students: {}, open: false, closed: false, in_wholesaler: false });
         this.ui.showHud(false);
-        this.ui.queue = []; if (this.ui.current) this.ui.closeDialog();
-        this.flow.showTitle(data.has_save, data.save_info);
+        this.ui.queue = []; if (this.ui.current) { this.ui.current.busy = false; this.ui.closeDialog(); }
+        if (data.screen === "title") this.flow.showTitle(data.has_save, data.save_info);
+        else this.openLanding();
       }
     }
     this.bridge.receive(data);

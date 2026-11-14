@@ -151,3 +151,9 @@ Decisions that the brief left open or that came up during implementation. Change
 - Market share: your sales / (your sales + bot shops in open zones).
 - The beach fence blocks the walking grid except at the gate (thin colliders used to be ignored by the grid).
 - The browser stamps every event with its day. An event of the previous day that arrives after "next_day" (for example an autosave sent at 21:00 while the new day loads) is still applied but does not move the clock; before, it could set the new morning to 21:00 and end the new day at its first tick.
+
+## v12 changes
+- Accounts: e-mail (stored lower case, unique) and a password of at least 8 characters, stored as a PBKDF2-SHA256 hash with a random salt. No e-mail confirmation and no password reset (no mail service).
+- A login is kept for 30 days through a random token in the browser's local storage; the server keeps only its hash.
+- Every save belongs to one account. Saves from before v12 go to the first account created on that database.
+- The deployed game needs a persistent disk (`NCT_DB_PATH`), otherwise accounts and saves are lost at every deploy.

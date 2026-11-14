@@ -193,21 +193,97 @@ class Flow {
     if (sid) this.openOrder(shop, sid);
   }
 
+  // ------------------------------------------------------- v12 landing page
+  // Shown before a login: what the game is, then log in or create an account.
+  showLanding(opts) {
+    const ui = this.game.ui, g = this.game;
+    let mode = this.landingMode || "login", error = opts.error || "";
+    const form = { email: "", password: "", confirm: "" };
+    const dlg = {
+      id: "P00L", noEsc: true, cls: "landing", busy: !!opts.busy,
+      custom: (box) => {
+        box.innerHTML = "";
+        const hero = el("div", "landing-hero");
+        hero.appendChild(el("div", "title-logo", "☕ Nova Campus Tycoon"));
+        hero.appendChild(el("div", "title-sub", "Run your café, beat the competition and take over the whole campus."));
+        box.appendChild(hero);
+        const cards = el("div", "landing-cards");
+        for (const [icon, head, text] of [
+          ["☕", "Run your café", "Plan the day, shop at the wholesaler, set your prices and serve the queue before your guests lose patience."],
+          ["🏪", "Buy the competition", "Earn enough to buy the other shops on campus and hire managers who run them for you."],
+          ["🏖️", "Take the beach", "Own the whole campus and the beach opens: a surf shack, a beach bar and an ice cream stand."],
+        ]) cards.appendChild(el("div", "landing-card", `<div class="lc-icon">${icon}</div><b>${head}</b><span>${text}</span>`));
+        box.appendChild(cards);
+        const card = el("div", "auth-card");
+        const tabs = el("div", "auth-tabs");
+        for (const [key, label] of [["login", "Log in"], ["register", "Create account"]]) {
+          const t = el("button", "auth-tab" + (mode === key ? " active" : ""), label);
+          t.onclick = () => { mode = this.landingMode = key; error = ""; draw(); };
+          tabs.appendChild(t);
+        }
+        card.appendChild(tabs);
+        const field = (name, label, type, auto) => {
+          const wrap = el("label", "auth-field", `<span>${label}</span>`);
+          const input = el("input");
+          input.type = type; input.name = name; input.autocomplete = auto; input.value = form[name];
+          input.oninput = () => { form[name] = input.value; };
+          wrap.appendChild(input);
+          card.appendChild(wrap);
+          return input;
+        };
+        const first = field("email", "E-mail", "email", "email");
+        field("password", "Password", "password", mode === "login" ? "current-password" : "new-password");
+        if (mode === "register") field("confirm", "Repeat password", "password", "new-password");
+        if (mode === "register") card.appendChild(el("div", "auth-note", "At least 8 characters. We only keep your e-mail and an encrypted password, to save your game."));
+        if (dlg.busy) card.appendChild(el("div", "auth-note", "Signing in ..."));
+        if (error) card.appendChild(el("div", "auth-error", esc(error)));
+        box.appendChild(card);
+        box.appendChild(el("div", "landing-foot", "A Nova SBE student project · Introduction to Programming 2026"));
+        setTimeout(() => { if (!dlg.busy && !form.email) first.focus(); }, 0);
+      },
+      primary: {
+        label: mode === "login" ? "Log in" : "Create account",
+        action: () => {
+          const email = form.email.trim();
+          if (!email || !form.password) { error = "Please enter your e-mail address and a password."; draw(); return "keep"; }
+          if (mode === "register" && form.password !== form.confirm) { error = "The two passwords are not the same."; draw(); return "keep"; }
+          dlg.busy = true; error = ""; draw();
+          g.bridge.send(mode === "login" ? "auth_login" : "auth_register", { email, password: form.password }, (r) => {
+            if (r.ok) { g.saveToken(r.result.token); return; } // Python switches to the title menu
+            dlg.busy = false; error = r.error; form.password = form.confirm = ""; draw();
+          });
+          return "keep";
+        },
+      },
+    };
+    const draw = () => {
+      dlg.primary.label = dlg.busy ? "Please wait ..." : (mode === "login" ? "Log in" : "Create account");
+      if (ui.current === dlg) ui.renderDialog();
+    };
+    ui.queue = []; if (ui.current) { ui.current.busy = false; ui.closeDialog(); }
+    ui.showDialog(dlg);
+    draw();
+  }
+
   // ------------------------------------------------------------- P00 title
   showTitle(hasSave, info) {
     const ui = this.game.ui;
     const help = "<b>W A S D</b> walk, <b>Shift</b> run, <b>click the game</b> to look around with the mouse (Esc frees it), " +
       "<b>E</b> or click to use things, <b>Enter</b> confirm, <b>Esc</b> cancel, <b>Tab</b> lists, <b>P</b> pause.";
+    const user = this.game.user;
     ui.showDialog({
       id: "P00", noEsc: true,
       custom: (box) => {
         box.appendChild(el("div", "title-logo", "☕ Nova Campus<br>Tycoon"));
         box.appendChild(el("div", "title-sub", "Run your café, beat the competition and take over the whole campus."));
+        if (user) box.appendChild(el("div", "account-line", `👤 ${esc(user.email)}`)); // v12
         if (hasSave && info) box.appendChild(el("div", "save-info", `💾 Saved game: day ${info.day} · ${euro(info.money)}`));
         box.appendChild(el("div", "dlg-text", help));
       },
       // With a saved game, Enter continues it; a new game asks first (it replaces the save).
-      extra: hasSave ? [{ label: "New game", action: () => this.confirmRestart() }] : [],
+      // v12: log out from here (the game is saved)
+      extra: [...(user ? [{ label: "Log out", action: () => this.game.logout() }] : []),
+        ...(hasSave ? [{ label: "New game", action: () => this.confirmRestart() }] : [])],
       primary: hasSave
         ? { label: "Continue", action: () => this.game.startSession("continue_game") }
         : { label: "New game", action: () => this.game.startSession("new_game") },

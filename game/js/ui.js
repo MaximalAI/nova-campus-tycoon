@@ -230,7 +230,7 @@ class UI {
     const d = this.current;
     const box = this.$("#dialog");
     box.innerHTML = "";
-    box.className = d.wide ? "wide" : "";
+    box.className = [d.wide ? "wide" : "", d.cls || ""].join(" ").trim(); // v12: d.cls (landing page)
     if (d.custom) { d.custom(box); }
     else {
       box.appendChild(el("div", "dlg-head",

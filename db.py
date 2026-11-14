@@ -9,7 +9,10 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+import auth
 
 DEFAULT_DB_PATH = Path(os.environ.get("NCT_DB_PATH", "data/game.db"))
 
@@ -22,6 +25,17 @@ CREATE TABLE IF NOT EXISTS saves (
     status TEXT NOT NULL,
     state_json TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    expires_at TEXT NOT NULL
 );
 """
 
@@ -48,16 +62,21 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     if "backup_json" not in cols:  # v8: the previous good state of every save
         with conn:
             conn.execute("ALTER TABLE saves ADD COLUMN backup_json TEXT")
+    if "user_id" not in cols:  # v12: every save belongs to an account
+        with conn:
+            conn.execute("ALTER TABLE saves ADD COLUMN user_id INTEGER")
     return conn
 
 
-def save_game(conn: sqlite3.Connection, state: dict, game_id: int | None = None) -> int:
-    """Save in one transaction; the state before this save stays as a backup (v8)."""
+def save_game(conn: sqlite3.Connection, state: dict, game_id: int | None = None, user_id: int | None = None) -> int:
+    """Save in one transaction; the state before this save stays as a backup (v8).
+    A new save belongs to the account user_id (v12)."""
     values = (state["day"], state["money"], round(state["reputation"]), state["status"], json.dumps(state))
     with conn:
         if game_id is None:
             cur = conn.execute(
-                "INSERT INTO saves (day, money, reputation, status, state_json) VALUES (?, ?, ?, ?, ?)", values
+                "INSERT INTO saves (day, money, reputation, status, state_json, user_id) VALUES (?, ?, ?, ?, ?, ?)",
+                (*values, user_id),
             )
             return cur.lastrowid
         conn.execute(
@@ -86,14 +105,80 @@ def load_game(conn: sqlite3.Connection, game_id: int) -> dict | None:
     return _parse(row[0]) or _parse(row[1])
 
 
-def abandon_running(conn: sqlite3.Connection) -> None:
-    """Starting over: running games are no longer offered for "Continue"."""
+def _owner(user_id: int | None) -> tuple[str, tuple]:
+    """v12: saves of one account (user_id None: saves without an account, from before v12)."""
+    return ("user_id IS NULL", ()) if user_id is None else ("user_id=?", (user_id,))
+
+
+def abandon_running(conn: sqlite3.Connection, user_id: int | None = None) -> None:
+    """Starting over: this player's running games are no longer offered for "Continue"."""
+    where, args = _owner(user_id)
     with conn:
-        conn.execute("UPDATE saves SET status='abandoned', updated_at=CURRENT_TIMESTAMP WHERE status='running'")
+        conn.execute(f"UPDATE saves SET status='abandoned', updated_at=CURRENT_TIMESTAMP WHERE status='running' AND {where}", args)
 
 
-def latest_game_id(conn: sqlite3.Connection) -> int | None:
+def latest_game_id(conn: sqlite3.Connection, user_id: int | None = None) -> int | None:
+    where, args = _owner(user_id)
     row = conn.execute(
-        "SELECT id FROM saves WHERE status='running' ORDER BY updated_at DESC, id DESC LIMIT 1"
+        f"SELECT id FROM saves WHERE status='running' AND {where} ORDER BY updated_at DESC, id DESC LIMIT 1", args
     ).fetchone()
     return row[0] if row else None
+
+
+def game_owner(conn: sqlite3.Connection, game_id: int) -> int | None:
+    row = conn.execute("SELECT user_id FROM saves WHERE id=?", (game_id,)).fetchone()
+    return row[0] if row else None
+
+
+# ---------------------------------------------------------------- v12 accounts
+
+
+def create_user(conn: sqlite3.Connection, email: str, password: str) -> int:
+    """A new account. One account per e-mail address (the column is UNIQUE, case does not matter)."""
+    email = auth.check_email(email)
+    password = auth.check_password(password)
+    try:
+        with conn:
+            first = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
+            uid = conn.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)",
+                               (email, auth.hash_password(password))).lastrowid
+            if first:  # the first account on this database keeps the games saved before accounts existed
+                conn.execute("UPDATE saves SET user_id=? WHERE user_id IS NULL", (uid,))
+    except sqlite3.IntegrityError:
+        raise auth.AuthError("There is already an account with this e-mail address. Please log in.") from None
+    return uid
+
+
+def check_login(conn: sqlite3.Connection, email: str, password: str) -> int:
+    row = conn.execute("SELECT id, password_hash FROM users WHERE email=?", (auth.normalize_email(email),)).fetchone()
+    if not row or not auth.verify_password(password, row[1]):
+        raise auth.AuthError("Wrong e-mail address or password.")
+    return row[0]
+
+
+def user_email(conn: sqlite3.Connection, user_id: int) -> str | None:
+    row = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
+    return row[0] if row else None
+
+
+def create_session(conn: sqlite3.Connection, user_id: int) -> str:
+    """A login that the browser keeps (as a token) for SESSION_DAYS days."""
+    token = auth.new_token()
+    expires = (datetime.now(UTC) + timedelta(days=auth.SESSION_DAYS)).isoformat()
+    with conn:
+        conn.execute("DELETE FROM sessions WHERE expires_at < ?", (datetime.now(UTC).isoformat(),))
+        conn.execute("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+                     (auth.token_hash(token), user_id, expires))
+    return token
+
+
+def session_user(conn: sqlite3.Connection, token: str) -> int | None:
+    row = conn.execute("SELECT user_id, expires_at FROM sessions WHERE token_hash=?", (auth.token_hash(token),)).fetchone()
+    if not row or row[1] < datetime.now(UTC).isoformat():
+        return None
+    return row[0]
+
+
+def end_session(conn: sqlite3.Connection, token: str) -> None:
+    with conn:
+        conn.execute("DELETE FROM sessions WHERE token_hash=?", (auth.token_hash(token),))
