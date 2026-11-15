@@ -65,6 +65,14 @@ class Mechanic:
     def demand_factor(self, state: dict) -> float:
         return 1.0
 
+    def visit_chance(self, state: dict) -> float:
+        """v13: share of the interested customers who come at all today (1.0 = everyone)."""
+        return 1.0
+
+    def plan_scale(self, state: dict, day: int) -> float:
+        """v13: how much more (or less) a manager should plan today than on ``day``."""
+        return 1.0
+
     def price(self, state: dict, product: str, base: int) -> int:
         return base
 
@@ -441,8 +449,20 @@ class Rental(Mechanic):
     A wetsuit then dries before it can be rented again. A surf class needs a booked
     instructor (bought per day). The daily wave rating changes the demand."""
 
+    # v13: bad waves mean fewer surfers, not surfers who pay less. Before, a factor below 1
+    # lowered what everybody would pay, so on a 1-star day nobody rented at all (-100 %
+    # instead of the -60 % the forecast shows). Good waves still raise what people pay.
     def demand_factor(self, state: dict) -> float:
-        return weather_factor(state, self.p.get("weather"))
+        return max(1.0, weather_factor(state, self.p.get("weather")))
+
+    def visit_chance(self, state: dict) -> float:
+        return min(1.0, weather_factor(state, self.p.get("weather")))
+
+    def plan_scale(self, state: dict, day: int) -> float:
+        """Today's waves against the waves of the day the plan is based on."""
+        from logic import weather_for  # late import: logic imports this module
+        then = weather_factor({"weather": weather_for(state["seed"], day)}, self.p.get("weather"))
+        return weather_factor(state, self.p.get("weather")) / then
 
     def units_for(self, product: str, portions: int) -> int:
         if product in self.p["rentals"]:
@@ -498,7 +518,7 @@ class Rental(Mechanic):
         return {"rentals": {p: r["hours"] for p, r in self.p["rentals"].items()},
                 "out": [{"item": a["item"], "back_at": a["back_at"]} for a in out],
                 "drying": [{"item": a["item"], "ready_at": a["ready_at"]} for a in drying],
-                "waves": (state.get("weather") or {}).get("waves"), "factor": self.demand_factor(state)}
+                "waves": (state.get("weather") or {}).get("waves"), "factor": weather_factor(state, self.p.get("weather"))}
 
 
 class SunsetBar(Mechanic):

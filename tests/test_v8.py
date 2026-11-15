@@ -60,7 +60,8 @@ def test_manager_plan_counts_the_customers_who_found_it_sold_out(game):
     state = next_day(state)
     plan = state["manager_proposals"]["cafe"]["plan"]
     buffer = CONFIG["manager"]["sold_out_buffer"]
-    assert plan["coffee"] == math.ceil(16 * buffer)
+    m = CONFIG["manager"]  # v13: missed customers count half, capped at 1.5 x the best day
+    assert plan["coffee"] == min(math.ceil((10 + 6 * m["missed_weight"]) * buffer), math.ceil(10 * m["max_vs_best_day"]))
     assert plan["coffee"] > plan["orange_juice"]
 
 

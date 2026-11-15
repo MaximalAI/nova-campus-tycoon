@@ -157,3 +157,10 @@ Decisions that the brief left open or that came up during implementation. Change
 - A login is kept for 30 days through a random token in the browser's local storage; the server keeps only its hash.
 - Every save belongs to one account. Saves from before v12 go to the first account created on that database.
 - The deployed game needs a persistent disk (`NCT_DB_PATH`), otherwise accounts and saves are lost at every deploy.
+
+## v13 changes
+- Manager plans: sold-out customers count half; a plan is at most 1.5x the shop's best day ever (per product, at least the minimum of 8).
+- Managers scale the whole plan down when the cash is short, so they always buy complete portions. When several managers buy together (07:00 or "Accept all"), each gets a share of the cash in proportion to the cost of his plan.
+- Waiting customers (-3) and manager-served customers (+1) change the reputation by at most +-15 per day together, net. Other reputation changes (orders, sold-out, cleaning) keep their own rules.
+- The cost estimate in the buy pop-up is what the managers paid this morning, or their current proposal if they have not bought yet. It is a warning only.
+- Waves below 3 stars: only the wave factor's share of beach visitors (for example 40 % on a 1-star day) considers the Surf Shack that day. Waves above 3 stars still raise what people pay, as before.

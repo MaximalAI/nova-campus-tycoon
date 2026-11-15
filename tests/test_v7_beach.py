@@ -121,7 +121,9 @@ def test_waves_and_temperature_change_the_demand():
     state["weather"] = {"waves": 1, "temperature": 16}
     calm_surf, cold_ice = logic.shop_factor(state, SURF), logic.shop_factor(state, ICE)
     state["weather"] = {"waves": 5, "temperature": 34}
-    assert logic.shop_factor(state, SURF) == pytest.approx(calm_surf * 4)  # 0.4 -> 1.6
+    # v13: calm sea means fewer surfers (visit chance 0.4), not surfers who pay less
+    assert logic.shop_factor(state, SURF) == pytest.approx(calm_surf * 1.6)  # 1.0 -> 1.6
+    assert mechanics.of(SURF).visit_chance(state) == 1.0
     assert logic.shop_factor(state, ICE) > 3 * cold_ice
     assert logic.view(state)["weather"] == {"waves": 5, "temperature": 34}
 

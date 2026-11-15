@@ -167,7 +167,8 @@ def test_manager_proposes_shopping_list_and_prices_in_the_morning(rich):
     state["stats"]["shops"]["cafe"]["sold_out_products"] = {"pastel_de_nata": 3}
     state = next_day(state)
     p = state["manager_proposals"]["cafe"]
-    assert p["plan"] == {"coffee": 36, "orange_juice": 8, "pastel_de_nata": 20}  # v8: (10 sold + 3 missed) * 1.5
+    # v13: (10 sold + 3 missed / 2) * 1.5 = 18, but at most 1.5 x the best day (10) = 15
+    assert p["plan"] == {"coffee": 36, "orange_juice": 8, "pastel_de_nata": 15}
     start = CONFIG["shops"]["cafe"]["start_prices"]
     assert p["prices"]["pastel_de_nata"] == start["pastel_de_nata"] + 10  # sold out -> a bit more
     assert p["prices"]["orange_juice"] == start["orange_juice"] - 10  # nobody bought it -> a bit less

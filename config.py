@@ -101,6 +101,9 @@ CONFIG = {
         "sold_out_to_competitor": -2,  # v8: found the shelves empty and went to a competitor
         "sold_out_partial": -1,  # v10: part of the order was sold out, the customer took the rest
         "sold_out_daily_cap": 15,  # v8: sold-out losses cost at most this much reputation per day
+        # v13: customers who waited too long (-) and your managers' happy customers (+) share one
+        # daily budget: together they change the reputation by at most this much per day (net)
+        "customer_daily_cap": 15,
         "order_cancelled": -3,  # you cancelled an accepted order
         "rejected": -1,  # you turned the customer away
         "cleaning_missed": -15,  # v11: per shop you had to clean and left dirty
@@ -531,7 +534,12 @@ CONFIG = {
     # After you buy the competitor, its barista keeps selling automatically and
     # orders supplies every morning (and right after the purchase) for this plan.
     # Manager proposals (v5): yesterday's sales plus a buffer, at least this many portions.
-    "manager": {"buffer": 1.2, "sold_out_buffer": 1.5, "min_portions": 8},
+    "manager": {
+        "buffer": 1.2, "sold_out_buffer": 1.5, "min_portions": 8,
+        # v13: customers who found it sold out count only half (some would not have come back),
+        # and a plan is at most this many times the best day the shop ever sold
+        "missed_weight": 0.5, "max_vs_best_day": 1.5,
+    },
     "acquisition_cost": 30_000,  # default; v7: every shop has its own "acquisition_cost"
     "cleaning_spots": {
         "counter": {"name": "Wipe the counter", "minutes": 3},

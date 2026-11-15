@@ -34,3 +34,7 @@ Only presentation: positions, walking paths, animation, the camera, the HUD, tim
 - `auth.py`: e-mail and password rules, password hashing (PBKDF2), login tokens. No game rules.
 - `db.py`: tables `users` (unique e-mail) and `sessions` (token hashes), `saves.user_id`.
 - `app.py`: the browser sends `auth_register`, `auth_login`, `auth_token` (login kept in the browser) and `auth_logout` as events. Without a login the payload's `screen` is `landing`, then `title`, then `game`.
+
+## Manager purchases (v13)
+- `logic._managers_buy_all` lets every manager who has not bought yet buy at once (the 07:00 tick and the new event `confirm_all_manager_plans` from "Accept all"). The cash is shared in proportion to the cost of each plan, and `_affordable_plan` scales a plan down until its shopping list fits, so a shop always gets complete portions.
+- Mechanics can lower the share of customers who consider a shop at all (`visit_chance`, the Surf Shack on calm days) and scale a manager's plan (`plan_scale`).

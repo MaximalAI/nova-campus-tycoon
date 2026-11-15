@@ -60,7 +60,10 @@ class Flow {
       if (total) return "Everything on your list is in the cart - pay at the checkout.";
     }
     if (this.ws && this.shelvesToFill(this.ws).length && ["SET_PRICES", "SHOP_OPEN"].includes(this.v.day_state)) return this.v.objective; // v10
-    if (this.canSkipToOpening() && !this.canStartDay()) return "Your managers are still at the wholesaler - you can start the day once they are back."; // v11
+    // v13: once the prices are saved, say so instead of asking for them again
+    const priced = this.pricesDone();
+    if (this.canSkipToOpening() && !this.canStartDay()) return (priced ? "Prices set. " : "") + "Your managers are still at the wholesaler - you can start the day once they are back."; // v11
+    if (this.canSkipToOpening() && priced) return "Prices set - press ⏩ Start the day (top right).";
     if (this.canSkipToOpening()) return this.ws ? "Set your prices at the counter, then press ⏩ Start the day (top right)."
       : "Your managers have everything ready - press ⏩ Start the day (top right)."; // v10
     return this.v.objective;
@@ -86,7 +89,11 @@ class Flow {
         return { x: 32, z: 2.3 };
       }
       case "WALK_TO_CAFE": { const b = this.bagHasItemsFor(ws) ? ws : this.bagShop(); return b ? P[b].storage : P[ws].storage; }
-      case "SET_PRICES": { const sh = this.shelvesToFill(ws); return sh.length ? P[ws].stationAt["shelf_" + sh[0]] : P[ws].register; }
+      case "SET_PRICES": { // v13: no marker once the prices are saved and you only wait for ⏩
+        const sh = this.shelvesToFill(ws);
+        if (sh.length) return P[ws].stationAt["shelf_" + sh[0]];
+        return this.pricesDone() && this.canSkipToOpening() ? null : P[ws].register;
+      }
       case "SHOP_OPEN": {
         if (P[ws].machines) return this.machineTarget(ws);
         const sh = this.shelvesToFill(ws); // v10: an empty Mercado shelf first
@@ -318,7 +325,7 @@ class Flow {
     rows.push({ label: "Sold yesterday", value: sold });
     const ws = v.work_shop;
     let text = v.day === 1
-      ? "Welcome to campus! You run the café on the left. Plan your day at the <b>planning board</b>, buy supplies at the <b>wholesaler</b> and open at 08:00. Click the minimap to travel quickly."
+      ? "Welcome to campus! Your café is right behind you (☕ on the minimap). Plan your day at the <b>planning board</b>, buy supplies at the <b>wholesaler</b> and open at 08:00. Click the minimap to travel quickly."
       : "A new day begins. What do you want to sell today?";
     if (ws && ws !== "cafe" && v.shops.cafe.manager) text = `Your managers run your other shops now. You start today in <b>${esc(this.shopName(ws))}</b>: plan, shop and serve there yourself until you hire a manager for it too.`;
     if (!ws) text = v.next_target ? `Your managers run your shops. Check their proposals, then save up for <b>${esc(this.shopName(v.next_target))}</b>.`
@@ -358,11 +365,13 @@ class Flow {
     this.game.ui.showDialog({
       id: "P23", icon: "🧑‍🍳", title: "Your managers' proposals", unique: true,
       text: `Your managers want to buy supplies for today. Accept all, or look at each proposal. ` +
-        `<span class="sub">If you do nothing, they buy at ${fmtTime(this.cfg.time.manager_buys_at)}.</span>`,
+        `<span class="sub">If you do nothing, they buy at ${fmtTime(this.cfg.time.manager_buys_at)}.</span>` +
+        // v13: say it before they buy when the cash is not enough for every plan
+        (total > v.money ? `<div class="warn">You only have ${euro(v.money)}. Each manager buys the same share of his plan (complete portions).</div>` : ""),
       rows,
       secondary: { label: "One by one", action: () => { this.reviewOneByOne = true; setTimeout(() => this.morningSequence(), 0); } },
       primary: { label: "Accept all", action: () => {
-        for (const s of shops) this.send("confirm_manager_plan", { shop: s }, this.ok());
+        this.send("confirm_all_manager_plans", {}, this.ok()); // v13: one event, the cash is shared fairly
       } },
     });
   }
@@ -845,6 +854,8 @@ class Flow {
   }
 
   // -------------------------------------------------------- start the day early
+  // v13: the prices of the shop you run yourself are saved for today
+  pricesDone() { return !!(this.v && this.ws && this.v.shops[this.ws].prices_set); }
   canSkipToOpening() {
     const v = this.v;
     if (!v || v.status !== "running" || v.open || v.closed || this.game.clock.t >= this.cfg.time.open) return false;
@@ -1240,6 +1251,10 @@ class Flow {
           : `Shop ${spec.order} of ${Object.keys(this.cfg.shops).length} on your way to the monopoly. ` +
             `First buy ${esc(this.shopName(v.next_target))}. Price: ${euro(cost)}.${hours}`,
       rows: prices,
+      // v13: warn (but still allow it) when the purchase leaves too little for tomorrow's supplies
+      body: can && v.money >= cost && v.money - cost < (v.manager_cost_estimate || 0) ? (body) => body.appendChild(el("div", "warn",
+        `After buying you have ${euro(Math.max(0, v.money - cost))} left, but your managers need about ` +
+        `${euro(v.manager_cost_estimate)} for tomorrow's supplies. Their shops may sell out tomorrow.`)) : null,
       secondary: can ? { label: "Later" } : null,
       primary: can ? { label: `Buy for ${euro(cost)}`, disabled: v.money < cost,
         action: () => { this.send("buy_shop", { shop }, this.ok(() => this.checkEnd())); } } : { label: "OK" },
