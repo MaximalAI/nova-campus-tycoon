@@ -38,3 +38,8 @@ Only presentation: positions, walking paths, animation, the camera, the HUD, tim
 ## Manager purchases (v13)
 - `logic._managers_buy_all` lets every manager who has not bought yet buy at once (the 07:00 tick and the new event `confirm_all_manager_plans` from "Accept all"). The cash is shared in proportion to the cost of each plan, and `_affordable_plan` scales a plan down until its shopping list fits, so a shop always gets complete portions.
 - Mechanics can lower the share of customers who consider a shop at all (`visit_chance`, the Surf Shack on calm days) and scale a manager's plan (`plan_scale`).
+
+## Performance (v14)
+- `db.connect` runs the full integrity check and the schema update once per database file and process.
+- `app.py` keeps the state of the current run in `st.session_state["run_state"]`, so `payload()` does not load the save again right after `handle_events` wrote it.
+- The config and the lighting table are sent once per session (`static_sent`); the browser keeps them.

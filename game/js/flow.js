@@ -245,7 +245,11 @@ class Flow {
         if (dlg.busy) card.appendChild(el("div", "auth-note", "Signing in ..."));
         if (error) card.appendChild(el("div", "auth-error", esc(error)));
         box.appendChild(card);
-        box.appendChild(el("div", "landing-foot", "A Nova SBE student project · Introduction to Programming 2026"));
+        const foot = el("div", "landing-foot", "A Nova SBE student project · Introduction to Programming 2026 · ");
+        const legal = el("button", "linkish", "Legal notice (Impressum)"); // v14
+        legal.onclick = () => { this.game.ui.closeDialog(); setTimeout(() => this.openImpressum(() => this.showLanding({})), 0); };
+        foot.appendChild(legal);
+        box.appendChild(foot);
         setTimeout(() => { if (!dlg.busy && !form.email) first.focus(); }, 0);
       },
       primary: {
@@ -289,13 +293,46 @@ class Flow {
       },
       // With a saved game, Enter continues it; a new game asks first (it replaces the save).
       // v12: log out from here (the game is saved)
-      extra: [...(user ? [{ label: "Log out", action: () => this.game.logout() }] : []),
+      extra: [{ label: "Legal notice", action: () => { this.game.ui.closeDialog(); setTimeout(() => this.openImpressum(() => this.showTitle(hasSave, info)), 0); } }, // v14
+        ...(user ? [{ label: "Log out", action: () => this.game.logout() }] : []),
         ...(hasSave ? [{ label: "New game", action: () => this.confirmRestart() }] : [])],
       primary: hasSave
         ? { label: "Continue", action: () => this.game.startSession("continue_game") }
         : { label: "New game", action: () => this.game.startSession("new_game") },
     });
   }
+  // v14: legal notice (Impressum) with the team, the contact person and a disclaimer
+  openImpressum(back) {
+    const team = [["Maximilian Friedrich Kienzle", "79927"], ["Marvin Jan Kramer", "79997"], ["Nicole Schatz", "79509"],
+      ["Jan Andreas Hoffmann", "81217"], ["Jonas Vasterling", "66801"]];
+    this.game.ui.showDialog({
+      id: "P40", icon: "§", title: "Legal notice (Impressum)", unique: true, wide: true,
+      text: "Nova Campus Tycoon is a non-commercial student project, made for the course Introduction to Programming " +
+        "at Nova School of Business and Economics (Nova SBE), Carcavelos, Portugal (2026).",
+      body: (body) => {
+        body.appendChild(el("div", "sum-h", "Team"));
+        body.appendChild(el("table", "dlg-rows", team.map(([n, id]) => `<tr><td>${n}</td><td>Student ID ${id}</td></tr>`).join("")));
+        body.appendChild(el("div", "sum-h", "Contact and responsible for the content"));
+        body.appendChild(el("div", "note legal",
+          "Maximilian Kienzle<br>Hohe-Buch-Ring 21<br>Sankt Leon-Rot, Germany<br>E-mail: " +
+          `<a href="mailto:79929@novasbe.pt">79929@novasbe.pt</a>`));
+        body.appendChild(el("div", "sum-h", "Disclaimer"));
+        body.appendChild(el("div", "note legal",
+          "This game is a student project and is provided as is, free of charge, without any warranty. " +
+          "We take care to keep it correct and available, but we accept no liability for the content, for errors, " +
+          "for interruptions or for lost game data, except where the law does not allow such a limitation. " +
+          "All shops, people, prices and events in the game are fictional; any resemblance to real businesses or persons " +
+          "is not intended, and the game is not an offer or advertisement of any real business. " +
+          "Nova SBE is not responsible for this game. " +
+          "We are not responsible for the content of external websites. " +
+          "Personal data: for your account we store only your e-mail address, a protected (hashed) password and your saved game, " +
+          "only to let you log in and continue playing. Nothing is shared with others or used for advertising. " +
+          "Write to the contact address above to have your account deleted."));
+      },
+      primary: { label: "Back", action: () => { if (back) setTimeout(back, 0); } },
+    });
+  }
+
   confirmRestart() {
     const ui = this.game.ui;
     const back = this.v ? () => this.openPause() : () => this.showTitle(this.game.titleInfo.hasSave, this.game.titleInfo.info);
@@ -517,8 +554,8 @@ class Flow {
     const spec = this.cfg.wholesale_items[item], ui = this.game.ui;
     if (!this.v.in_wholesaler) return ui.toast("You are not inside the wholesaler.", true);
     const listed = !this.v.open && !this.v.closed ? (this.v.shopping_list[item] || 0) : null;
-    // v10: an item of the shopping list starts with the list amount, so Enter takes it
-    let qty = this.v.cart[item] ?? (listed || 0);
+    // v14: starts at 0 (or what is already in the cart); "Take the list amount" fills in the list amount
+    let qty = this.v.cart[item] ?? 0;
     const others = () => this.v.cart_total - (this.v.cart[item] || 0) * spec.price;
     ui.showDialog({
       id: "P04", icon: spec.icon, title: `Item: ${spec.name}`, text: esc(spec.description),
@@ -668,6 +705,13 @@ class Flow {
   openOrder(shop, sid) {
     const a = this.agents.get(sid);
     if (!a || !a.atCounter || a.mode !== "queue" || this.v.current_order) return;
+    // v14: something the customer wants sold out while he waited (for example the last croissant
+    // went into the order before): do not offer the order, ask Python again (he shows it as
+    // sold out and takes the rest or leaves, which costs reputation)
+    if ((a.order || []).some((p) => this.v.shops[shop].can_make && this.v.shops[shop].can_make[p] === false)) {
+      a.atCounter = false; a.order = null;
+      return;
+    }
     this.p09For = sid;
     const items = a.order || [];
     const chips = items.map((p) => `<span class="chip">${this.cfg.products[p].icon} ${esc(this.cfg.products[p].name)}</span>`).join("") +
@@ -730,7 +774,12 @@ class Flow {
         a.mode = "served"; // optimistic, so the dialog does not open again while Python answers
         this.send("accept", { shop, student: sid, player_inside: this.playerIn(shop) }, (r) => {
           this.p09For = null;
-          if (r.ok) { a.patience = a.patienceMax; return; }
+          if (r.ok && r.result.leaves) { this.soldOutLeaves(a, shop, r.result); return; } // v14
+          if (r.ok) {
+            a.patience = a.patienceMax;
+            if (r.result.sold_out) { a.order = r.result.order.items; a.soldOut = r.result.sold_out; this.soldOutPartial(shop, r.result); }
+            return;
+          }
           a.mode = "queue";
           this.game.ui.toast(r.error, true);
         });
@@ -1850,30 +1899,35 @@ class Flow {
       this.send("at_counter", { student: sid, shop }, (r) => {
         a.pendingCounter = false;
         if (!r.ok) { this.removeFromQueue(shop, sid); this.exitShop(a, shop); return; }
-        if (r.result.leaves) {
-          this.removeFromQueue(shop, sid);
-          a.emote = { icon: "😞", until: performance.now() + 3000 };
-          if (v.shops[shop].owner === "player") {
-            const names = (r.result.sold_out || []).map((p) => this.cfg.products[p].name).join(", ");
-            this.game.ui.toast(`Sold out: ${names} - the customer leaves (${r.result.reason || "nothing else worth it"})`, true);
-            this.repToast(r.result.rep_delta, "sold out");
-          }
-          this.leaveShop(a, shop, r.result.decision);
-          return;
-        }
+        if (r.result.leaves) { this.soldOutLeaves(a, shop, r.result); return; }
         a.order = r.result.items; a.soldOut = r.result.sold_out; a.atCounter = true;
-        if (r.result.sold_out.length && v.shops[shop].owner === "player") {
-          const names = r.result.sold_out.map((p) => this.cfg.products[p].name).join(", ");
-          const rest = r.result.items.map((p) => this.cfg.products[p].icon).join(" ");
-          this.game.ui.toast(`Sold out: ${names} - the customer still takes ${rest}`);
-          this.repToast(r.result.rep_delta, "part of the order missing"); // v10
-        }
+        this.soldOutPartial(shop, r.result);
       });
       return;
     }
     if (a.atCounter && !v.current_order && a.mode === "queue" && this.playerIn(shop) && !this.game.ui.dialogOpen && this.p09For !== sid) {
       this.openOrder(shop, sid);
     }
+  }
+
+  // v14: a customer at the counter finds something sold out (at the counter or when you accept)
+  soldOutLeaves(a, shop, res) {
+    const sid = a.id;
+    this.removeFromQueue(shop, sid);
+    a.emote = { icon: "😞", until: performance.now() + 3000 };
+    if (this.v.shops[shop].owner === "player") {
+      const names = (res.sold_out || []).map((p) => this.cfg.products[p].name).join(", ");
+      this.game.ui.toast(`Sold out: ${names} - the customer leaves (${res.reason || "nothing else worth it"})`, true);
+      this.repToast(res.rep_delta, "sold out");
+    }
+    this.leaveShop(a, shop, res.decision);
+  }
+  soldOutPartial(shop, res) {
+    if (!(res.sold_out || []).length || this.v.shops[shop].owner !== "player") return;
+    const names = res.sold_out.map((p) => this.cfg.products[p].name).join(", ");
+    const rest = (res.items || res.order?.items || []).map((p) => this.cfg.products[p].icon).join(" ");
+    this.game.ui.toast(`Sold out: ${names} - the customer still takes ${rest}`);
+    this.repToast(res.rep_delta, "part of the order missing"); // v10
   }
 
   stationOf(shop, product) {

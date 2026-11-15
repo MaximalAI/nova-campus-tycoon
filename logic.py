@@ -1339,17 +1339,14 @@ def _ev_queue_full(state, ev):
     return _decide(state, student["id"], exclude={ev.get("shop")})
 
 
-def _ev_at_counter(state, ev):
-    """A student reaches the counter: which of the wanted items can the shop make?"""
-    student = _student(state, ev["student"])
-    shop = ev.get("shop")
-    if student["status"] != st.QUEUING or not student["intent"] or student["intent"]["shop"] != shop:
-        raise GameError("This student is not at this counter.")
-    if not state["open"]:
-        raise GameError("The shop is not open.")
+def _counter_check(state, student: dict, shop: str) -> dict | None:
+    """Which of the wanted items can the shop make right now? None if all of them.
+
+    Otherwise the student re-decides without the sold-out products: he keeps the rest of
+    the order here, or leaves (to another shop or home). Your reputation suffers either way."""
     sold_out = [p for p in student["intent"]["items"] if not can_make(state, shop, p)]
     if not sold_out:
-        return {"items": student["intent"]["items"], "sold_out": []}
+        return None
     _note_sold_out(state, shop, sold_out)
     # Re-decide without the sold-out products: something else here, the other café, or nothing.
     st.transition(student, "give_up")
@@ -1370,6 +1367,20 @@ def _ev_at_counter(state, ev):
     reason = (f"prefers {SHOPS[decision['shop']]['name']}" if decision["action"] == "shop"
               else "nothing else here is worth the money")
     return {"items": [], "sold_out": sold_out, "leaves": True, "decision": decision, "rep_delta": delta, "reason": reason}
+
+
+def _ev_at_counter(state, ev):
+    """A student reaches the counter: which of the wanted items can the shop make?
+
+    v14: the browser asks again right before it shows the order pop-up, if something the
+    student wants has sold out meanwhile."""
+    student = _student(state, ev["student"])
+    shop = ev.get("shop")
+    if student["status"] != st.QUEUING or not student["intent"] or student["intent"]["shop"] != shop:
+        raise GameError("This student is not at this counter.")
+    if not state["open"]:
+        raise GameError("The shop is not open.")
+    return _counter_check(state, student, shop) or {"items": student["intent"]["items"], "sold_out": []}
 
 
 def _note_sold_out(state, shop: str, products: list[str]) -> None:
@@ -1396,15 +1407,23 @@ def _ev_accept(state, ev):
     student = _student(state, ev["student"])
     if student["status"] != st.QUEUING or student["intent"]["shop"] != shop:
         raise GameError("This student is not waiting at your counter.")
-    items = [p for p in student["intent"]["items"] if can_make(state, shop, p)]
-    if not items:
-        raise GameError("Nothing from this order is in stock.")
+    # v14: something sold out while the student waited at the counter (for example the last
+    # croissant went into the order before). Before, the order was accepted without it (no
+    # reputation loss) or refused with an error. Now the student reacts as at the counter:
+    # he takes the rest or leaves, and the sold-out product costs reputation.
+    check = _counter_check(state, student, shop)
+    if check and check.get("leaves"):
+        return check
+    items = check["items"] if check else student["intent"]["items"]
     student["intent"]["items"] = items
     st.transition(student, "accepted")
     state["current_order"] = {"shop": shop, "student": student["id"], "items": items,
                               "accepted_at": state["time"]}
     state["tray"] = []
-    return {"order": state["current_order"]}
+    result = {"order": state["current_order"]}
+    if check:
+        result.update({"sold_out": check["sold_out"], "rep_delta": check["rep_delta"], "reason": check["reason"]})
+    return result
 
 
 def _ev_reject(state, ev):
@@ -2036,7 +2055,11 @@ def view(state: dict) -> dict:
         "money": state["money"],
         "reputation": round(state["reputation"]),
         "rep_perks": reputation_perks(state),
-        "history": state["history"][-7:],
+        # v14: only what the summary table shows (the full days were 40+ KB in every answer)
+        "history": [{k: h.get(k) for k in ("day", "revenue", "tips", "profit", "served", "lost", "reputation", "money")}
+                    | ({"competitor": {"revenue": h["competitor"].get("revenue"), "served": h["competitor"].get("served")}}
+                       if h.get("competitor") else {})
+                    for h in state["history"][-7:]],
         # small numbers per day for the charts (all days)
         "chart": [{k: h.get(k) for k in ("day", "revenue", "tips", "profit", "served", "lost", "reputation",
                                          "market_share", "money", "investments", "market_zones")} |

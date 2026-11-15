@@ -40,11 +40,21 @@ CREATE TABLE IF NOT EXISTS sessions (
 """
 
 
+# v14: the full check (PRAGMA quick_check reads the whole file) and the schema update run
+# once per database file and process, not on every request: the server answered slower
+# the more games were saved.
+_READY: set[str] = set()
+
+
 def connect(path: str | Path | None = None) -> sqlite3.Connection:
     """Open the database. v8 safety: write-ahead log and full sync, so a crash, a closed
     browser or an empty laptop battery never leaves a half-written save behind. A damaged
     database file is moved aside and a fresh one is started."""
     path = Path(path or os.environ.get("NCT_DB_PATH", DEFAULT_DB_PATH))
+    if str(path) in _READY and path.exists():  # v14: checked and migrated already in this process
+        conn = sqlite3.connect(path, timeout=10)
+        conn.execute("PRAGMA synchronous=FULL")
+        return conn
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10)
     try:
@@ -65,6 +75,7 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     if "user_id" not in cols:  # v12: every save belongs to an account
         with conn:
             conn.execute("ALTER TABLE saves ADD COLUMN user_id INTEGER")
+    _READY.add(str(path))
     return conn
 
 

@@ -315,3 +315,7 @@ button.chip.toggle:disabled { opacity: .45; cursor: default; }
 @media (max-width: 720px) { .landing-cards { grid-template-columns: 1fr; } #dialog.landing .title-logo { font-size: 34px; } }
 #dialog.landing .dlg-buttons { justify-content: center; }
 #dialog.landing .dlg-buttons .btn.primary { min-width: 220px; }
+/* v14: legal notice */
+.linkish { background: none; border: none; padding: 0; color: #7a6650; text-decoration: underline; font: inherit; cursor: pointer; }
+.note.legal { line-height: 1.45; margin-bottom: 6px; }
+.note.legal a { color: var(--green-dark); }

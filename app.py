@@ -58,7 +58,11 @@ ss.setdefault("session", 0)  # changes whenever a game is (re)loaded
 ss.setdefault("user_id", None)  # v12: the account that is logged in
 ss.setdefault("token", None)
 
+ss.setdefault("static_sent", False)  # v14: config and lighting table go to the browser once
+
 AUTH_EVENTS = ("auth_register", "auth_login", "auth_token", "auth_logout")
+# v14: the state handled in this run is kept in ss["run_state"], so payload() does not load
+# and migrate it again (callbacks run before the script, so it lives in the session state)
 
 
 def _conn():
@@ -99,6 +103,10 @@ def handle_events() -> None:
     if not batch or batch.get("seq") == ss.last_seq:
         return
     ss.last_seq = batch["seq"]
+    if all(e.get("type") == "need_static" for e in batch["events"]):
+        ss.static_sent = False  # v14: a new game view in the browser asks for config and lighting
+        ss.results = [{"cid": e.get("cid"), "ok": True, "result": {}} for e in batch["events"]]
+        return
     conn = _conn()
     if any(e.get("type") in AUTH_EVENTS for e in batch["events"]):
         ss.results = [_auth_event(conn, e) if e.get("type") in AUTH_EVENTS
@@ -132,6 +140,7 @@ def handle_events() -> None:
             if not r["ok"]:
                 print("REJECTED", ev, r["error"], flush=True)
     db.save_game(conn, state, ss.game_id)
+    ss["run_state"] = (ss.game_id, state)
 
 
 def _save_info(conn) -> dict | None:
@@ -145,14 +154,23 @@ def _save_info(conn) -> dict | None:
     return {"day": day, "money": money, "saved_at": updated}
 
 
+LIGHTING = timeclock.lighting_table(10)
+
+
 def payload() -> dict:
     conn = _conn()
-    state = db.load_game(conn, ss.game_id) if ss.game_id is not None and ss.user_id is not None else None
+    cached = ss.pop("run_state", None)
+    if cached and cached[0] == ss.game_id and ss.user_id is not None:
+        state = cached[1]  # v14: just processed and saved in this run
+    else:
+        state = db.load_game(conn, ss.game_id) if ss.game_id is not None and ss.user_id is not None else None
+        if state is not None:
+            logic.migrate(state)
     if state is None:
         ss.game_id = None
-    else:
-        logic.migrate(state)
     info = _save_info(conn)
+    send_static = not ss.static_sent
+    ss.static_sent = True
     return {
         "ack": ss.last_seq,
         "results": ss.results,
@@ -164,8 +182,9 @@ def payload() -> dict:
         "save_info": info,
         "view": logic.view(state) if state else None,
         "plan": logic.day_plan(state) if state else None,
-        "config": CONFIG,
-        "lighting": timeclock.lighting_table(10),
+        # v14: only once per browser session (about 55 KB); the browser keeps them
+        "config": CONFIG if send_static else None,
+        "lighting": LIGHTING if send_static else None,
     }
 
 

@@ -31,10 +31,12 @@ class Game {
     this.config = config;
     const vp = this.root.querySelector("#viewport");
     const r = new THREE.WebGLRenderer({ antialias: true });
-    r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // v14: at most 1.25 render pixels per screen pixel (Retina screens asked for 4x the pixels
+    // of a normal screen, which made laptops hot) and the cheaper PCF shadow filter
+    r.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     r.setSize(window.innerWidth, window.innerHeight);
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.shadowMap.type = THREE.PCFShadowMap;
     r.toneMapping = THREE.NoToneMapping;
     vp.appendChild(r.domElement);
     this.renderer = r;
@@ -84,7 +86,16 @@ class Game {
     });
     this.root.querySelector("#loading").classList.add("hidden");
     this.last = performance.now();
-    const loop = () => { this.frame(); requestAnimationFrame(loop); };
+    // v14: at most 60 frames per second (120 Hz screens doubled the work), and 30 while
+    // nothing moves (title screen, or a pop-up open with the clock stopped)
+    this.lastDraw = 0;
+    const loop = (now) => {
+      requestAnimationFrame(loop);
+      const idle = this.screen !== "game" || (this.ui.dialogOpen && !this.clock.running);
+      if (now - this.lastDraw < (idle ? 1000 / 30 : 1000 / 60) - 2) return;
+      this.lastDraw = now;
+      this.frame();
+    };
     requestAnimationFrame(loop);
     window.__nct = this; // for automated play-testing
     window.__nctP = P;
@@ -257,8 +268,16 @@ class Game {
   // ------------------------------------------------------------ data from Python
   onData(data) {
     if (!data) return;
-    if (!this.renderer) { this.lighting = data.lighting; this.init(data.config); }
-    this.lighting = data.lighting;
+    // v14: Python sends the config and the lighting table only once per session
+    if (!this.renderer) {
+      if (!data.config) { // this view is new (for example after a reload of the component): ask for them
+        if (!this.askedStatic) { this.askedStatic = true; this.bridge.send("need_static"); }
+        this.bridge.receive(data);
+        return;
+      }
+      this.lighting = data.lighting; this.init(data.config);
+    }
+    if (data.lighting) this.lighting = data.lighting;
     this.titleInfo = { hasSave: data.has_save, info: data.save_info };
     this.user = data.user; // v12: the account that is logged in (null: landing page)
     const prevView = this.view;
@@ -465,8 +484,12 @@ class Game {
     this.hemi.color.copy(sky).lerp(new THREE.Color(1, 1, 1), 0.55);
     this.sun.intensity = mix("sun") * 1.35;
     this.sun.color.setRGB(lerp(a.sun_color[0], b.sun_color[0], w), lerp(a.sun_color[1], b.sun_color[1], w), lerp(a.sun_color[2], b.sun_color[2], w));
-    const el_ = mix("elevation") * Math.PI / 180, az = mix("azimuth") * Math.PI / 180;
-    const center = this.player ? new THREE.Vector3(this.player.pos.x * 0.5, 0, this.player.pos.z * 0.5) : new THREE.Vector3();
+    // v14: the sun angle moves in steps of 0.5° and the shadow area in steps of 8 m. Before,
+    // both moved a little every frame, so every shadow edge shimmered and flickered.
+    const q = (deg) => Math.round(deg * 2) / 2 * Math.PI / 180;
+    const el_ = q(mix("elevation")), az = q(mix("azimuth"));
+    const snap = (x) => Math.round(x * 0.5 / 8) * 8;
+    const center = this.player ? new THREE.Vector3(snap(this.player.pos.x), 0, snap(this.player.pos.z)) : new THREE.Vector3();
     this.sun.target.position.copy(center);
     this.sun.position.set(center.x + Math.cos(el_) * Math.sin(az) * 120, Math.max(4, Math.sin(el_) * 120), center.z - Math.cos(el_) * Math.cos(az) * 120);
     const lamps = mix("lamps");
@@ -620,9 +643,10 @@ class Game {
     const ui = this.ui, W = window.innerWidth, H = window.innerHeight;
     ui.beginLabels();
     if (this.screen === "game" && this.view) {
+      let hintEl = null;
       if (this.currentHint) {
-        const e = ui.label("hint", `<div class="hint"><b>E</b>${esc(this.currentHint.label())}</div>`);
-        ui.placeLabel(e, new THREE.Vector3(this.currentHint.pos.x, 2.5, this.currentHint.pos.z), this.camera, W, H);
+        hintEl = ui.label("hint", `<div class="hint"><b>E</b>${esc(this.currentHint.label())}</div>`);
+        ui.placeLabel(hintEl, new THREE.Vector3(this.currentHint.pos.x, 2.5, this.currentHint.pos.z), this.camera, W, H);
       }
       const now = performance.now();
       for (const a of this.flow.agents.values()) {
@@ -657,6 +681,21 @@ class Game {
     }
     if (this.screen === "game" && this.view) this.eggs.labels(ui, W, H);
     ui.endLabels();
+    if (this.screen === "game" && this.view) this.liftHint();
+  }
+
+  // v14: the "E ..." hint never covers a customer's order bubble: it moves up above it
+  liftHint() {
+    const hint = this.ui.labels.get("hint");
+    if (!hint || hint.style.display === "none") return;
+    let r = hint.getBoundingClientRect();
+    for (const [k, e] of this.ui.labels) {
+      if (k === "hint" || !k.startsWith("b") || e.style.display === "none") continue;
+      const b = e.getBoundingClientRect();
+      if (r.right < b.left || r.left > b.right || r.bottom < b.top || r.top > b.bottom) continue;
+      hint.style.top = `${parseFloat(hint.style.top) - (r.bottom - b.top) - 6}px`;
+      r = hint.getBoundingClientRect();
+    }
   }
 
   // Nobody walks through anybody: people push each other apart, the player is pushed out of them.

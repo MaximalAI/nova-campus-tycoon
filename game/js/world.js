@@ -578,7 +578,6 @@ class World {
       this.box(0.6, 0.45, 0.6, 0x2a9d8f, -29.5, 0.23, z);
       this.collide(-32.4, -29.2, z - 0.7, z + 0.7);
     }
-    const doorSign = this.box(0.08, 0.6, 0.9, 0xffffff, -27.75, 1.6, 2.1);
     const floorSpot = new THREE.Mesh(new THREE.CircleGeometry(0.6, 24), new THREE.MeshLambertMaterial({ color: 0xb08968, emissive: 0x000000 }));
     floorSpot.rotation.x = -Math.PI / 2; floorSpot.position.set(-31.5, 0.05, 1.6); this.scene.add(floorSpot);
     floorSpot.visible = false; // only dirty after closing (see updateWorldState)
@@ -594,8 +593,7 @@ class World {
     // v5: only before opening (prices cannot change during the day)
     this.addInteractable({ id: "register_cafe", pos: { x: -35.8, z: -0.6 }, meshes: [register, counter], label: () => g.flow.registerLabel(),
       enabled: () => g.flow.canSetPrices("cafe"), action: () => g.flow.useRegister("cafe") });
-    this.addInteractable({ id: "door_sign", pos: { x: -27.2, z: 2.1 }, meshes: [doorSign], label: () => "Open the café",
-      enabled: () => g.view && !g.view.open && !g.view.closed && g.clock.t >= 7, action: () => g.flow.askOpen() });
+    // v14: the white sign left of the door is gone (the café opens at the register or with ⏩)
     this.addInteractable({ id: "station_cafe_coffee", pos: { x: -38.1, z: -3.6 }, meshes: coffee, label: () => "Make a coffee",
       enabled: cafeOpenManual, action: () => g.flow.openStation("cafe", "coffee") });
     this.addInteractable({ id: "station_cafe_juice", pos: { x: -38.1, z: -1.6 }, meshes: juicer, label: () => "Squeeze orange juice",
@@ -1194,6 +1192,11 @@ class World {
 
   lounger(x, z, r) {
     const m = this.box(0.7, 0.1, 1.9, 0xffffff, x, 0.32, z); m.rotation.y = r;
+    // v14: four legs, so the lounger stands on the sand instead of floating
+    for (const [lx, lz] of [[-0.3, -0.85], [0.3, -0.85], [-0.3, 0.85], [0.3, 0.85]]) {
+      const ox = lx * Math.cos(r) + lz * Math.sin(r), oz = -lx * Math.sin(r) + lz * Math.cos(r);
+      this.box(0.06, 0.28, 0.06, 0xd9d9d9, x + ox, 0.14, z + oz, { cast: false });
+    }
     const back = this.box(0.7, 0.08, 0.7, 0xffffff, x + Math.sin(r) * 0.85, 0.55, z + Math.cos(r) * 0.85);
     back.rotation.set(-0.6, r, 0, "YXZ");
     this.box(0.62, 0.04, 1.7, 0x3a86ff, x, 0.39, z, { cast: false }).rotation.y = r;
@@ -1207,8 +1210,16 @@ class World {
     this.box(0.08, 0.9, 2.0, 0xd62828, x - 1.0, 2.95, z); this.box(0.08, 0.9, 2.0, 0xd62828, x + 1.0, 2.95, z);
     const roof = new THREE.Mesh(new THREE.ConeGeometry(1.6, 0.7, 4), this.mat(0xffffff, { flatShading: true }));
     roof.position.set(x, 3.9, z); roof.rotation.y = Math.PI / 4; roof.castShadow = true; this.scene.add(roof);
-    this.box(0.9, 0.06, 2.4, 0x8d6e63, x, 1.2, z - 1.9, { cast: false }).rotation.x = 0.9;
+    // v14: the stairs go up towards the platform (they were the wrong way round): the low end
+    // is on the sand away from the tower, the high end at the platform edge, with steps
+    const ramp = this.box(0.9, 0.06, 3.0, 0x8d6e63, x, 1.25, z - 1.87, { cast: false });
+    ramp.rotation.x = -0.95;
+    for (let i = 0; i < 7; i++) {
+      const f = (i + 0.5) / 7; // 0 = bottom, 1 = top
+      this.box(0.9, 0.05, 0.22, 0x6d4c41, x, 0.05 + f * 2.38, z - 2.74 + f * 1.73, { cast: false });
+    }
     this.collide(x - 1.0, x + 1.0, z - 1.0, z + 1.0);
+    this.collide(x - 0.5, x + 0.5, z - 2.8, z - 1.0);
   }
 
   volleyNet(x, z) {
@@ -1270,8 +1281,11 @@ class World {
     for (const b of Object.values(BUILDINGS)) {
       if (x > b.x0 - pad && x < b.x1 + pad && z > b.z0 - pad && z < b.z1 + pad) return true;
     }
+    // v14: every obstacle up to 20 m (flower beds, terraces, bike racks, loungers ...); before,
+    // only small ones (< 2 m) counted, so people walked through the long flower beds.
+    // Larger colliders (the sea, the fence) are handled on their own.
     for (const c of this.colliders) {
-      if (c.x1 - c.x0 < 2 && c.z1 - c.z0 < 2 && x > c.x0 - pad && x < c.x1 + pad && z > c.z0 - pad && z < c.z1 + pad) return true;
+      if (c.x1 - c.x0 < 20 && c.z1 - c.z0 < 20 && x > c.x0 - pad && x < c.x1 + pad && z > c.z0 - pad && z < c.z1 + pad) return true;
     }
     // v11: the beach fence is long and thin, so the check above missed it: managers walked
     // through it. Only the gate in the middle is open.

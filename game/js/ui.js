@@ -85,6 +85,8 @@ class UI {
     this.$("#pause-btn").classList.toggle("active", g.clock.paused);
     const tray = this.$("#tray");
     const order = v.current_order;
+    // v14: the key help (bottom left) hides while the order bar is shown, so they never overlap
+    this.$("#help").classList.toggle("hidden", !!order);
     if (order) {
       tray.classList.remove("hidden");
       const need = order.items.map((p) => g.config.products[p].icon).join(" ");

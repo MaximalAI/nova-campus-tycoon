@@ -164,3 +164,11 @@ Decisions that the brief left open or that came up during implementation. Change
 - Waiting customers (-3) and manager-served customers (+1) change the reputation by at most +-15 per day together, net. Other reputation changes (orders, sold-out, cleaning) keep their own rules.
 - The cost estimate in the buy pop-up is what the managers paid this morning, or their current proposal if they have not bought yet. It is a warning only.
 - Waves below 3 stars: only the wave factor's share of beach visitors (for example 40 % on a 1-star day) considers the Surf Shack that day. Waves above 3 stars still raise what people pay, as before.
+
+## v14 changes
+- The walking grid treats every collider up to 20 m as an obstacle; the sea and the beach fence keep their own rules.
+- Render quality: pixel ratio at most 1.25, PCF shadows, 60 frames per second at most (30 when idle). The sun angle is rounded to 0.5° and the shadow centre to 8 m steps.
+- The browser gets the config and the lighting table once per Streamlit session; a fresh browser view without them asks with the event `need_static`.
+- The view's `history` holds only the fields of the summary table (day, revenue, tips, profit, served, lost, reputation, money, competitor revenue and served).
+- A sold-out product found at "Accept" is handled like one found at the counter (take the rest or leave, sold-out reputation loss), never as an error.
+- The legal notice names Maximilian Kienzle as contact; it is a student project notice, not reviewed by a lawyer.

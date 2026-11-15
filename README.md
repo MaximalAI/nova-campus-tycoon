@@ -24,8 +24,10 @@ The game opens in the browser (full window). It needs an internet connection bec
 
 Locally the first account you create keeps the games you saved before v12 (they had no account yet).
 
+The legal notice (Impressum) with the team, the contact person and a disclaimer opens from the landing page footer and from the title menu.
+
 ## Deployment (Render)
-- Web service on Render, Python runtime, branch of the current version (v13).
+- Web service on Render, Python runtime, branch of the current version (v14).
 - Build command: `uv sync --frozen && uv cache prune --ci`
 - Start command: `uv run streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true`
 - A persistent disk mounted at `/var/data` and the environment variable `NCT_DB_PATH=/var/data/game.db`, so accounts and saved games survive deploys and restarts.
@@ -94,6 +96,6 @@ Two secrets are hidden on the campus. We do not spoil where; `specs/v8-fixes-and
 
 ## Documents
 - Product brief v2 (source of truth): `docs/product-brief-v2.md`
-- Task specs: `specs/v13-playtest-bug-fixes.md` (current), `specs/v12-landing-page-and-accounts.md`, `specs/v11-managers-map-and-summary.md`, `specs/v10-shop-logic.md`, `specs/v9-fixes-and-casino.md`, `specs/v8-fixes-and-easter-eggs.md`, `specs/v7-campus-expansion.md`, `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
+- Task specs: `specs/v14-world-ui-and-performance.md` (current), `specs/v13-playtest-bug-fixes.md`, `specs/v12-landing-page-and-accounts.md`, `specs/v11-managers-map-and-summary.md`, `specs/v10-shop-logic.md`, `specs/v9-fixes-and-casino.md`, `specs/v8-fixes-and-easter-eggs.md`, `specs/v7-campus-expansion.md`, `specs/v6-fixes.md`, `specs/v5-managers-and-polish.md`, `specs/v4-improvements.md`, `specs/v3-fixes.md`, `specs/v2-campus-game.md`
 - Architecture: `docs/architecture.md`, assumptions: `docs/assumptions.md`
 - Rules for coding agents: `AGENTS.md` (Claude Code reads `CLAUDE.md`, which imports it)
