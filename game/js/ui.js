@@ -16,6 +16,8 @@ class UI {
     this.$("#skip-btn").addEventListener("click", () => game.flow.skipToOpening());
     // v8: one press opens the statistics (pointerdown fires at once, the HUD text below updates often)
     this.$("#gain").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); game.flow.openStats(); });
+    // v15: the "i" at the stock opens the full list of your storage, shelves and machines
+    this.$("#stock-info").addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); game.flow.openStockInfo(); });
     this.$("#mono").addEventListener("click", () => game.flow.openMonopoly());
     this.$("#minimap").addEventListener("click", () => game.openBigMap());
     this.$("#bigmap-close").addEventListener("click", () => game.closeBigMap());
@@ -48,9 +50,18 @@ class UI {
     this.$("#clock").textContent = fmtTime(g.clock.t);
     this.$("#day").textContent = `Day ${v.day}`;
     const money = this.$("#money");
-    money.textContent = euro(v.money);
-    money.classList.toggle("neg", v.money <= 0);
-    const gain = v.today ? v.today.gain : 0;
+    // v15: during a roulette or slot spin the old cash stays on screen until the result shows
+    const hold = this.moneyHold;
+    const shown = hold ? hold.money : v.money;
+    money.textContent = euro(shown);
+    money.classList.toggle("neg", shown <= 0);
+    const gain = hold ? hold.gain : v.today ? v.today.gain : 0;
+    // v15: cash from the snack machines is not in your account until you deposit it
+    const carry = this.$("#carry");
+    if (carry) {
+      carry.classList.toggle("hidden", !v.carried_cash);
+      if (v.carried_cash) carry.innerHTML = `💰 You carry ${euro(v.carried_cash)} - bring it to the SnackBots office`;
+    }
     const gEl = this.$("#gain"), gText = `today ${gain >= 0 ? "+" : ""}${euro(gain)}`;
     if (this.$("#gain-text").textContent !== gText) this.$("#gain-text").textContent = gText;
     gEl.classList.toggle("neg", gain < 0);
@@ -133,7 +144,7 @@ class UI {
     const owned = Object.keys(v.shops).filter((s) => v.shops[s].owner === "player");
     // v7: with many shops, the ones run by a manager are shown in one compact line
     const managed = owned.length > 2 ? owned.filter((s) => v.shops[s].manager) : [];
-    if (v.carried_cash) html += `<div class="stock-shop">💰 Cash to bring to the office: ${euro(v.carried_cash)}</div>`;
+    if (v.carried_cash) html += `<div class="stock-shop carry-line">💰 Cash to bring to the office: ${euro(v.carried_cash)}</div>`;
     if (managed.length) html += `<div class="stock-shop">🧑‍🍳 Managers run: ${managed.map((s) => cfg.shops[s].icon || "🏪").join(" ")}</div>`;
     for (const s of owned) {
       if (managed.includes(s)) continue;
@@ -210,6 +221,15 @@ class UI {
     if (spec.unique && (this.current?.id === spec.id || this.queue.some((q) => q.id === spec.id))) return;
     this.game.releasePointer(); // dialogs need the mouse cursor
     if (this.current) { if (spec.urgent) this.queue.unshift(spec); else this.queue.push(spec); return; }
+    this.current = spec;
+    this.renderDialog();
+    if (spec.onShow) spec.onShow();
+  }
+  // v15: show a pop-up on top of the open one (the pause menu); the open one comes back after it
+  interrupt(spec) {
+    const cur = this.current;
+    if (!cur || cur.busy || cur.id === spec.id) { this.queue.unshift(spec); return; }
+    this.queue.unshift(cur);
     this.current = spec;
     this.renderDialog();
     if (spec.onShow) spec.onShow();

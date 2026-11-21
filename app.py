@@ -36,6 +36,10 @@ st.markdown(
     [data-testid="stDecoration"], [data-testid="stStatusWidget"] {display: none !important;}
     .block-container {padding: 0 !important; max-width: 100% !important;}
     html, body, [data-testid="stAppViewContainer"] {overflow: hidden !important; background: #0d1b2a;}
+    /* v15: Streamlit fades an element to 33 % while Python runs for more than 0.5 s ("stale").
+       The whole game is one element, so on a slow answer the screen faded to a dark blue film
+       and jumped back when the answer came: the flicker. The game must never fade. */
+    [data-stale="true"], [data-stale="true"] * {opacity: 1 !important; transition: none !important;}
     </style>""",
     unsafe_allow_html=True,
 )

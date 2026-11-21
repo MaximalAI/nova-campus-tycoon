@@ -1087,6 +1087,8 @@ class Flow {
     ];
     const people = [
       ["Customers served", s.served],
+      // v15: something they wanted was sold out, they took the rest (no reputation plus)
+      ...(s.partly ? [["... of them: partly happy (part sold out)", s.partly]] : []),
       ["Lost (left unhappy)", s.lost],
       ["... of them: sold out", s.sold_out || 0],
       ["Wrong orders", s.wrong],
@@ -1098,20 +1100,37 @@ class Flow {
     grid.appendChild(el("div", "", `<div class="sum-h">💶 Money</div>` + this.table(["", ""], money)));
     grid.appendChild(el("div", "", `<div class="sum-h">🙋 Customers</div>` + this.table(["", ""], people)));
     box.appendChild(grid);
-    const keys = [...new Set([...Object.keys(s.plan), ...Object.keys(s.sold)])].filter((p) => (s.plan[p] || s.sold[p]));
+    // v15: why the reputation changed today
+    const src = s.rep_sources || {};
+    const names = { served: "served customers", partly: "partly served (sold out)", waited: "waited too long", sold_out: "sold out, left",
+      broken: "broken machine", wrong: "wrong orders", rejected: "turned away", cancelled: "cancelled orders", cleaning: "shop left dirty", customers: "customers" };
+    const parts = Object.entries(src).filter(([, d]) => Math.round(d)).sort((a, b) => b[1] - a[1])
+      .map(([k, d]) => `<span class="${d > 0 ? "up" : "neg"}">${d > 0 ? "+" : ""}${Math.round(d)}</span> ${names[k] || k}`);
+    if (parts.length) {
+      box.appendChild(el("div", "note rep-why", `<b>Reputation today:</b> ${parts.join(" · ")}` +
+        `<span class="sub"> (all customers together move it by at most ${this.cfg.reputation.customer_daily_cap} per day)</span>`));
+    }
+    // v15: grey = what you had (plan, leftovers and extra purchases), green = sold, the line = plan.
+    // You can sell more than you planned, but never more than you had.
+    const had = s.available || {};
+    const keys = [...new Set([...Object.keys(s.plan), ...Object.keys(s.sold), ...Object.keys(had)])]
+      .filter((p) => (s.plan[p] || s.sold[p] || had[p]));
     if (!keys.length) return;
-    const max = Math.max(1, ...keys.map((p) => Math.max(s.plan[p] || 0, s.sold[p] || 0)));
+    const max = Math.max(1, ...keys.map((p) => Math.max(s.plan[p] || 0, s.sold[p] || 0, had[p] || 0)));
     const bars = el("div", "bars");
     for (const p of keys) {
       const b = el("div", "bar");
+      const have = Math.max(had[p] || 0, s.sold[p] || 0);
       // v11: the label sits under the bars (own line), so the chart never runs into the text
       b.innerHTML = `<div class="pair">` +
-        `<span class="col plan" style="height:${(s.plan[p] || 0) / max * 70}px"></span>` +
-        `<span class="col sold" style="height:${(s.sold[p] || 0) / max * 70}px"></span></div>` +
-        `<div class="lab" title="${esc(products[p].name)}">${products[p].icon} ${s.sold[p] || 0}/${s.plan[p] || 0}</div>`;
+        `<span class="col plan" style="height:${have / max * 70}px"></span>` +
+        `<span class="col sold" style="height:${(s.sold[p] || 0) / max * 70}px"></span>` +
+        (s.plan[p] ? `<span class="plan-tick" style="bottom:${s.plan[p] / max * 70}px" title="plan ${s.plan[p]}"></span>` : "") + `</div>` +
+        `<div class="lab" title="${esc(products[p].name)}: sold ${s.sold[p] || 0} of ${have}, plan ${s.plan[p] || 0}">${products[p].icon} ${s.sold[p] || 0}/${have}` +
+        `<div class="sub">plan ${s.plan[p] || 0}</div></div>`;
       bars.appendChild(b);
     }
-    box.appendChild(el("div", "sum-h", "Sold vs. plan <span class=\"sub\">(grey = plan incl. your managers' plans, green = sold)</span>"));
+    box.appendChild(el("div", "sum-h", "Sold vs. what you had <span class=\"sub\">(grey = what you had: plan, leftovers and extra purchases · green = sold · line = plan)</span>"));
     box.appendChild(bars);
   }
   summaryStock(box, s) {
@@ -1403,9 +1422,11 @@ class Flow {
   openEnd() {
     const v = this.v, win = v.status === "victory";
     this.game.ui.showDialog({
-      id: "P19", icon: win ? "🏆" : "💸", title: win ? "Monopoly reached!" : "Bankrupt!", unique: true, noEsc: true, urgent: true,
+      id: "P19", icon: win ? "🏆" : "💸", title: win ? "Monopoly reached!" : v.end_reason === "stuck" ? "Game over: out of money and stock" : "Bankrupt!", unique: true, noEsc: true, urgent: true,
       text: win ? `Every shop on the map is yours and runs with a manager. You built the monopoly in <b>${v.day} day${v.day === 1 ? "" : "s"}</b>.`
-        : "Your cash dropped to €0.00 or below at the end of the day.",
+        : v.end_reason === "stuck" // v15
+          ? `You have only ${euro(v.money)} left, no stock in any of your shops and nothing to sell. That is less than the cheapest item your shops can use at the wholesaler, so no day can bring money any more.`
+          : "Your cash dropped to €0.00 or below at the end of the day.",
       rows: [{ label: "Days played", value: String(v.day) }, { label: "Total profit", value: euro(v.total_profit) }],
       // v6: after winning you can keep playing without a goal
       extra: win ? [{ label: "New game", cls: "secondary", action: () => this.confirmRestart() }] : [],
@@ -1430,6 +1451,7 @@ class Flow {
       // v8: music and sound effects can be switched off separately
       body: (b) => {
         b.innerHTML = `<div class="settings">
+          ${g.user ? `<div class="account-line">👤 Logged in as <b>${esc(g.user.email)}</b></div>` : ""}
           <label class="snd-toggle"><input type="checkbox" data-snd="music" ${g.sound.musicOn ? "checked" : ""}><span>🎵 Background music</span></label>
           <label class="snd-toggle"><input type="checkbox" data-snd="sfx" ${g.sound.sfxOn ? "checked" : ""}><span>🔊 Sound effects</span></label>
         </div>`;
@@ -1440,6 +1462,8 @@ class Flow {
       extra: [
         { label: "🔄 New game", cls: "secondary", action: () => this.confirmRestart() },
         { label: "Save & quit", cls: "secondary", action: () => { g.ui.closeDialog(); g.startSession("quit"); } },
+        // v15: log out right here (the game is saved after every action)
+        ...(g.user ? [{ label: "Log out", cls: "secondary", action: () => { g.ui.closeDialog(); g.logout(); } }] : []),
       ],
       primary: { label: "Resume" },
     };
@@ -2156,6 +2180,100 @@ class Flow {
   }
 
   // ------------------------------------- v8 SnackBots: machines on the campus (P25, P26, P27)
+  // v15: the "i" at the stock: everything you have, shop by shop (storage with best-before,
+  // shelves/display, vending machines, bag and carried cash)
+  openStockInfo() {
+    const v = this.v, cfg = this.cfg;
+    if (!v) return;
+    const items = cfg.wholesale_items, products = cfg.products;
+    const days = (d) => d === null || d === undefined ? "keeps" : d <= 1 ? "<span class=\"neg\">spoils tonight</span>" : `${d} days`;
+    this.game.ui.showDialog({
+      id: "P47", icon: "📦", title: "Your stock", unique: true, wide: true,
+      text: "Everything you can still sell, shop by shop. Portions = how many more customers a product can serve.",
+      body: (b) => {
+        const owned = Object.keys(v.shops).filter((x) => v.shops[x].owner === "player");
+        for (const shop of owned) {
+          const sh = v.shops[shop];
+          const who = sh.manager ? "your manager" : shop === v.work_shop ? "you" : "";
+          b.appendChild(el("div", "sum-h", `${cfg.shops[shop].icon || "🏪"} ${esc(cfg.shops[shop].name)}${who ? ` <span class="sub">(${who})</span>` : ""}`));
+          const portions = Object.entries(sh.portions || {}).map(([p, n]) => `${products[p].icon} ${esc(products[p].name)}: <b>${n ?? "-"}</b>`).join(" &nbsp; ");
+          b.appendChild(el("div", "note", `Portions: ${portions || "none"}`));
+          const rows = Object.entries(sh.stock || {}).map(([i, st]) => [`${items[i].icon} ${esc(items[i].name)}`,
+            `${st.units} ${esc(items[i].base_name || "")}`, st.batches.map((x) => `${x.units}: ${days(x.days_left)}`).join("<br>")]);
+          b.insertAdjacentHTML("beforeend", rows.length ? this.table(["Storage", "Amount", "Best before"], rows) : `<div class="note">Storage: empty</div>`);
+          const front = Object.entries(sh.front || {});
+          if (front.length) b.appendChild(el("div", "note", "On the shelves / in the display: " +
+            front.map(([p, n]) => `${products[p].icon} ${n}`).join(" &nbsp; ")));
+          const machines = Object.entries((sh.mech && sh.mech.machines) || {});
+          if (machines.length && P[shop].machines) {
+            b.appendChild(el("div", "note", machines.map(([mid, m]) => `🤖 ${esc(P[shop].machines[mid].name)}: ` +
+              (m.broken ? "<span class=\"neg\">broken</span>" : Object.entries(m.stock).map(([p, n]) => `${products[p].icon} ${n}`).join(" ") || "empty") +
+              (m.cash ? ` · 💰 ${euro(m.cash)}` : "")).join("<br>")));
+          }
+        }
+        const bag = Object.entries(v.bag || {});
+        if (bag.length) b.appendChild(el("div", "note", "<b>In your bag:</b> " + bag.map(([i, q]) => `${items[i].icon} ${q}`).join(" &nbsp; ")));
+        if (v.carried_cash) b.appendChild(el("div", "note", `<b>💰 You carry ${euro(v.carried_cash)}</b> from the snack machines - deposit it at the SnackBots office.`));
+      },
+      primary: { label: "Close" },
+    });
+  }
+
+  // v15: the SnackBots shop you run yourself (not with a manager), or null
+  snackShop() {
+    const v = this.v;
+    if (!v || this.game.screen !== "game") return null;
+    for (const [shop, pt] of Object.entries(P)) {
+      if (pt.machines && v.shops[shop] && v.shops[shop].owner === "player" && !v.shops[shop].manager && v.work_shop === shop) return shop;
+    }
+    return null;
+  }
+  // v15: every machine that needs you (broken, cash inside, or not full), for the orange rings
+  machinesToVisit() {
+    const shop = this.snackShop();
+    if (!shop || this.v.closed) return [];
+    const s = this.v.shops[shop], cap = s.mech.capacity, n = this.cfg.shops[shop].products.length;
+    return Object.entries(s.mech.machines || {}).filter(([, m]) => {
+      const items = Object.values(m.stock).reduce((a, x) => a + x, 0);
+      return m.broken || m.cash > 0 || items < cap * n;
+    }).map(([mid]) => P[shop].machines[mid]);
+  }
+  // v15: a tag above every machine: what it holds, the cash inside, or that it is broken
+  machineTags() {
+    const shop = this.snackShop();
+    if (!shop) return [];
+    const s = this.v.shops[shop], cap = s.mech.capacity, n = this.cfg.shops[shop].products.length;
+    return Object.entries(s.mech.machines || {}).map(([mid, m]) => {
+      const pt = P[shop].machines[mid];
+      const items = Object.values(m.stock).reduce((a, x) => a + x, 0);
+      if (m.broken) return { id: mid, pos: pt.pos, cls: "broken", html: `🔧 ${esc(pt.name)}: broken - repair it` };
+      const need = items < cap * n || m.cash > 0;
+      return { id: mid, pos: pt.pos, cls: need ? "need" : "",
+        html: `🤖 ${esc(pt.name)} · 🍫 ${items}/${cap * n}${m.cash ? ` · 💰 ${euro(m.cash)}` : ""}` };
+    });
+  }
+  // v15: the first time you run SnackBots, a short explanation of how the shop works
+  explainSnackbots(shop) {
+    let seen = false;
+    try { seen = localStorage.getItem("nct_snack_help") === "1"; } catch (e) { /* storage blocked */ }
+    if (seen) return;
+    try { localStorage.setItem("nct_snack_help", "1"); } catch (e) { /* storage blocked */ }
+    const names = Object.values(P[shop].machines).map((m) => esc(m.name)).join(", ");
+    this.game.ui.showDialog({
+      id: "P46", icon: "🤖", title: "How SnackBots works", unique: true,
+      text: "SnackBots has no counter. Students buy from <b>three snack machines</b> on the campus " +
+        `(${names}). Your job is to keep them running:`,
+      body: (b) => b.appendChild(el("ol", "howto",
+        "<li><b>Fill your bag</b> at the office storage (buy the snacks at the wholesaler first).</li>" +
+        "<li><b>Go round all three machines</b> - every machine that needs you has an <b>orange ring</b> and a tag " +
+        "with its stock. Press <b>E</b> to refill it.</li>" +
+        "<li><b>Take out the cash</b> at each machine. It is <b>not in your account yet</b>: you carry it " +
+        "(shown under your money, top right).</li>" +
+        "<li><b>Bring the cash to the office board</b> to deposit it.</li>" +
+        "<li>A machine can <b>break</b> (red light): repair it, or nobody can buy there and your reputation drops.</li>")),
+      primary: { label: "Got it" },
+    });
+  }
   machineLabel(shop, mid) {
     const v = this.v;
     if (!v || v.shops[shop].owner !== "player") return null;
@@ -2321,8 +2439,14 @@ class Flow {
           const got = res.ok ? res.result.items : [];
           head.emote = { icon: got.length ? "😊" : "😞", until: performance.now() + 3000 };
           if (res.ok && !got.length && this.v.shops[shop].owner === "player") {
-            this.game.ui.toast(`${this.shopName(shop)}: the machine is empty - the customer leaves`, true);
-            this.repToast(res.result.rep_delta, "sold out");
+            // v15: a broken machine is not an empty machine
+            if (res.result.broken) {
+              this.game.ui.toast(`${this.shopName(shop)}: the machine ${esc(P[shop].machines[mid].name)} is broken - the customer leaves`, true);
+              this.repToast(res.result.rep_delta, "machine broken");
+            } else {
+              this.game.ui.toast(`${this.shopName(shop)}: the machine is empty - the customer leaves`, true);
+              this.repToast(res.result.rep_delta, "sold out");
+            }
           }
           if (q[0] === head.id) q.shift();
           head.shop = null; head.wanted = null; head.machine = null;
@@ -2419,6 +2543,8 @@ class Flow {
     const inside = g.world.buildingAt(p);
     for (const shop of this.shopKeys) {
       const e = P[shop].entry;
+      // v15: only when you walk up to the door from outside, not when you come out of the shop
+      if (inside === shop) this.zoneFlags[shop + "_entry"] = true;
       if (e && v.shops[shop].owner === "bot") zone(shop + "_entry", !inside && dist2(p, e) < 2.4, () => this.openCompetitor(shop));
       zone(shop + "_bag", inside === shop && v.shops[shop].owner === "player" && this.bagHasItemsFor(shop), () => this.openStock(shop));
     }

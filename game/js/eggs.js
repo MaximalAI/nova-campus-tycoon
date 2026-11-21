@@ -606,8 +606,10 @@ class EasterEggs {
     g.sound.play("spin");
     g.ui.refreshDialog();
     const started = performance.now();
+    this.holdMoney(bet); // v15: same for the slot machines
     g.flow.send("slot", { machine: this.slotId, amount: bet }, (r) => {
       setTimeout(() => {
+        g.ui.moneyHold = null;
         this.slotSpinning = false; slot.spinUntil = 0;
         if (!r.ok) { g.ui.toast(r.error, true); g.ui.refreshDialog(); return; }
         this.lastPull = r.result; this.lastPullBet = bet;
@@ -719,8 +721,12 @@ class EasterEggs {
     this.placeChips(this.bet, this.chip); // v9: the stake lands on the table
     // look at the table from the player's side while it spins
     g.camYaw = 0; g.camPitch = 0.75; g.camDist = Math.min(g.camDist, 4.5);
+    // v15: the cash shown stays at "before the spin minus the stake" until the ball has landed
+    // (Python answers at once, so the money used to change 1-2 s before the number showed)
+    this.holdMoney(this.chip);
     g.flow.send("roulette", { bet: this.bet, amount: this.chip }, (r) => {
       const reveal = () => {
+        g.ui.moneyHold = null;
         this.spinning = false;
         this.wheelSpeed = 0; this.ballSpeed = 0;
         if (!r.ok) { this.settleChips(false); g.ui.toast(r.error, true); return; }
@@ -735,6 +741,15 @@ class EasterEggs {
       };
       setTimeout(reveal, Math.max(0, 2700 - (performance.now() - started)));
     });
+  }
+
+  // v15: freeze the cash display during a spin (the stake is already on the table)
+  holdMoney(stake) {
+    const v = this.game.view, ui = this.game.ui;
+    if (!v) return;
+    ui.moneyHold = { money: v.money - stake, gain: (v.today ? v.today.gain : 0) - stake };
+    clearTimeout(this.holdTimer);
+    this.holdTimer = setTimeout(() => { ui.moneyHold = null; }, 9000); // safety: never stuck
   }
 
   // put the ball on the pocket of the number (the texture starts at angle 0 and runs clockwise seen from above)

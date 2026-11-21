@@ -172,3 +172,11 @@ Decisions that the brief left open or that came up during implementation. Change
 - The view's `history` holds only the fields of the summary table (day, revenue, tips, profit, served, lost, reputation, money, competitor revenue and served).
 - A sold-out product found at "Accept" is handled like one found at the counter (take the rest or leave, sold-out reputation loss), never as an error.
 - The legal notice names Maximilian Kienzle as contact; it is a student project notice, not reviewed by a lawyer.
+
+## v15 changes
+- Every customer of every owned shop counts in one daily reputation budget of +-15 net: served (+2, +1 fast when you serve yourself), partly served (-1 at the counter, no plus at the handover), sold out (-1 home, -2 to a competitor), waited too long (-3), broken machine (-2), wrong order (-4), turned away (-1), cancelled (-3). Cleaning (-15 per dirty shop) stays outside the budget.
+- A manager's happy customer counts like the player's (+2) but never gets the fast bonus.
+- "What you had" in the summary chart is sold + portions left before the overnight spoilage, summed over your shops. For products sold from a front (machines, shelves, display) only the front counts.
+- Game over "stuck" is checked at the end of the day with the cheapest wholesale item that one of your shops can use (one piece of it already makes a sellable portion).
+- The SnackBots explanation (P46) is shown once per browser (kept in the browser's local storage).
+- The headless simulation cleans after closing like a real player.

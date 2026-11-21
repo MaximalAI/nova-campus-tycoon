@@ -244,6 +244,14 @@ class World {
       new THREE.MeshBasicMaterial({ color: 0xffd166, side: THREE.DoubleSide, transparent: true, opacity: 0.95 }));
     s.add(arrow);
     this.markers.arrow = arrow;
+    // v15: SnackBots has three machines - every machine that needs you gets a ring (orange)
+    this.markers.extra = [];
+    for (let i = 0; i < 4; i++) {
+      const r = new THREE.Mesh(new THREE.RingGeometry(0.6, 0.8, 36),
+        new THREE.MeshBasicMaterial({ color: 0xffa94d, transparent: true, opacity: 0.85, side: THREE.DoubleSide }));
+      r.rotation.x = -Math.PI / 2; r.position.y = 0.055; r.visible = false; s.add(r);
+      this.markers.extra.push(r);
+    }
     this.mergeStatic();
   }
 

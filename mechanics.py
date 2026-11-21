@@ -185,6 +185,14 @@ class Vending(Mechanic):
     def available(self, state: dict, product: str) -> bool:
         return True  # broken machines simply do not count in front_count
 
+    def objective(self, state: dict, day_state: str) -> str | None:
+        """v15: say what to do with the machines, and remind about cash in your pocket."""
+        carried = state.get("carried_cash", 0)
+        if carried and day_state in ("SET_PRICES", "SHOP_OPEN", "CLOSING"):
+            return (f"You carry €{carried / 100:.2f} from the machines - it is not in your account yet. "
+                    "Bring it to the board in the SnackBots office.")
+        return super().objective(state, day_state)
+
     def serve_at(self, state: dict, machine: str | None) -> None:
         self.data(state)["at"] = machine if machine in self.machine_ids() else None
 

@@ -92,17 +92,26 @@ CONFIG = {
         "factor_range": [0.7, 1.3],  # demand factor at reputation 0 and 100
         "patience_range": [0.75, 1.35],  # patience multiplier at reputation 0 and 100
         "tips": [[60, 0.05], [75, 0.10], [90, 0.15]],  # from this reputation on: share of the bill
+        # v15: one rule for every customer in every shop you own, served by you or by a manager:
+        # served completely +2 (you: +1 more when fast), partly served (something sold out) -1,
+        # left without buying -3 (waited too long) or -1/-2 (sold out), wrong order -4, turned
+        # away -1, cancelled -3. All of them share one
+        # daily budget of +-15 (net), so the reputation follows the balance of happy and unhappy
+        # customers but cannot swing by more than 15 in a day.
         "correct_order": 2,
-        "staff_served": 1,  # a happy customer served by your manager
+        "staff_served": 2,  # v15: a happy customer of your manager counts like one of yours (was 1)
         "fast_bonus": 1,
         "wrong_order": -4,
         "customer_lost": -3,  # waited too long and left
         "sold_out_left": -1,  # found the shelves empty and went home (v8: every time)
         "sold_out_to_competitor": -2,  # v8: found the shelves empty and went to a competitor
         "sold_out_partial": -1,  # v10: part of the order was sold out, the customer took the rest
-        "sold_out_daily_cap": 15,  # v8: sold-out losses cost at most this much reputation per day
+        "machine_broken": -2,  # v15: wanted to buy at a broken vending machine and left
         # v13: customers who waited too long (-) and your managers' happy customers (+) share one
-        # daily budget: together they change the reputation by at most this much per day (net)
+        # daily budget: together they change the reputation by at most this much per day (net).
+        # v15: every customer counts in it (also yours and the sold-out ones). Before, sold-out
+        # losses had their own -15 cap, so a big empire lost up to 15 every day while the gains
+        # were capped at +15: the reputation could only sink.
         "customer_daily_cap": 15,
         "order_cancelled": -3,  # you cancelled an accepted order
         "rejected": -1,  # you turned the customer away
@@ -445,8 +454,11 @@ CONFIG = {
                              {"id": "m2", "name": "Main Path", "x": 13.0, "z": 3.8, "rot": 3.1416},
                              {"id": "m3", "name": "Mercado Corner", "x": 21.0, "z": -3.8, "rot": 0.0},
                          ],
-                         "objectives": {"SET_PRICES": "Refill the machines on campus and set your prices at the office.",
-                                        "SHOP_OPEN": "Refill the machines, collect the cash and bring it to the office."}},
+                         # v15: say that there are three machines and how they are marked
+                         "objectives": {"SET_PRICES": "Fill your bag at the office storage, then refill all 3 snack machines "
+                                                      "(orange rings) and set your prices at the office.",
+                                        "SHOP_OPEN": "Go round the 3 snack machines (orange rings): refill them, take out "
+                                                     "the cash and bring it to the office."}},
             "icon": "🤖",
             "building": {"x0": 7, "x1": 15, "z0": 13, "z1": 21, "door": "west", "wall": 0xe3f2fd,
                          "trim": 0x1565c0, "roof": 0x1e88e5, "sign": "SNACKBOTS", "interior": "office"},

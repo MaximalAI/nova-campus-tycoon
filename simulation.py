@@ -90,6 +90,11 @@ def simulate_day(state: dict, speed: int = 1, real_step: float = 0.25, serve_pla
         res = send({"type": "accept", "shop": shop, "student": sid, "player_inside": True})
         if res is None:
             return
+        if res.get("leaves"):  # v14: sold out while waiting
+            queues[shop].remove(sid)
+            handle_decision(sid, res.get("decision"))
+            next_customer(shop)
+            return
         busy[shop] = True
         minutes = sum(CONFIG["products"][p]["prep_minutes"] for p in res["order"]["items"])
         at(current + minutes / 60, "manual_done", sid=sid, shop=shop, items=res["order"]["items"])
@@ -110,6 +115,13 @@ def simulate_day(state: dict, speed: int = 1, real_step: float = 0.25, serve_pla
                     for s in queues:
                         queues[s].clear()
                         busy[s] = False
+                # v15: the simulated player cleans up after closing, like a real one (before, the
+                # simulation always lost the reputation for a dirty shop)
+                if state["day_state"] == logic.CLOSING and state.get("cleaning"):
+                    for shop, spots in list(state["cleaning"].items()):
+                        for spot, done in list(spots.items()):
+                            if not done and state["day_state"] == logic.CLOSING:
+                                send({"type": "clean", "shop": shop, "spot": spot})
                 if res and res.get("opened"):
                     for s in queues:
                         next_customer(s)

@@ -1,6 +1,6 @@
 # Nova Campus Tycoon v2: Product Brief
 
-Status: 11.11.2026 (updated for v7). Source of truth since version 2. Replaces `docs/product-brief.md` wherever the two differ. Section 14 describes the v7 campus expansion; where it differs from older sections, section 14 wins.
+Status: 21.11.2026 (updated for v15). Source of truth for the product ideas since version 2. Replaces `docs/product-brief.md` wherever the two differ. Section 14 describes the v7 campus expansion and section 15 the changes of v8 to v15; newer sections win where they differ from older ones. The current rules with all numbers are described feature by feature in `docs/game-logic.md`.
 
 ## 0. How the ideas were unified
 
@@ -494,3 +494,22 @@ Balance target (team decision 11.11.2026, updated 12.11.2026 for v8): a good pla
 - `logic.migrate()` loads v4, v5 and v6 saves: missing shops are added as bots, the old competitor statistics move to the new per-shop fields. A v6 save that had already won continues as a running game with the new goal.
 - Performance stays smooth at 8x with all students of both zones on the map: static scenery is merged into a few meshes by colour, and every person is drawn with five meshes (body, two arms, two legs) that share geometry and material.
 - At the wholesaler, every new shop has one aisle (P04 lists its items). With several managers, their morning proposals come as one summary (P23, "Accept all" or "One by one").
+
+## 15. Changes from v8 to v15 (current state)
+
+The ideas of sections 1 to 14 still hold. These versions changed or added rules; each has its own spec in `specs/`, and `docs/game-logic.md` describes the resulting rules in full.
+
+| Version | Change of the product |
+|---|---|
+| v8 | Saves are crash-safe (full sync, backup of the previous state). Sound and music. Two easter eggs: Jep and the hidden casino with roulette. Every customer who leaves because of a sold-out product costs reputation. |
+| v9 | One wholesaler stand per item; the casino gets a bar and slot machines. |
+| v10 | Upgrades and cleaning spots per shop; the SnackBots manager fills every machine; Mercado & Go objectives; partly missing orders cost reputation. |
+| v11 | Managers go round the machines, a dirty shop costs 15 reputation, investments are shown outside the day's profit, the day summary has five tabs, the big map. |
+| v12 | Landing page and accounts (e-mail and password, one account per address, saves per player); the game is hosted at www.novacampustycoon.com. |
+| v13 | Manager plans are capped (sold-out customers count half, at most 1.5x the best day); short cash is shared between managers who buy complete portions; the buy pop-up warns about tomorrow's manager costs; a calm sea means fewer surfers. |
+| v14 | People avoid all obstacles; beach props fixed; legal notice; a product that sells out while a customer waits is shown as sold out instead of an error; lighter rendering and faster server answers. |
+| v15 | No dimming flicker while the server answers; one reputation rule for every customer of every owned shop with one daily budget of +-15; partly served customers; SnackBots guidance (explanation, rings and tags on every machine, carried cash); stock overview; account and log out in the settings; game over when the player is stuck without stock and money. |
+
+**Reputation (replaces the numbers in section 7 where they differ):** served +2 (+1 fast when you serve yourself), partly served -1, sold out -1 or -2, waited too long -3, broken machine -2, wrong order -4, turned away -1, cancelled -3; all customers of one day move the reputation by at most 15 (net). A dirty shop costs 15 more.
+
+**Game over (extends section 9):** besides bankruptcy (cash at or below €0 at the end of a day), the game ends when the player is stuck: no stock in any shop, nothing in the bag or cart, no cash in a machine or in his pocket, and less money than the cheapest wholesale item his shops can use.

@@ -107,9 +107,10 @@ class Game {
     for (const k in this.input) this.input[k] = false;
     if (this.ui.current?.id === "P20") return;
     if (this.ui.dialogOpen) {
-      // keep the open pop-up, show the pause menu right after it
+      // v15: the pause menu comes first (on top of the open pop-up, e.g. the shopping list);
+      // after "Resume" the pop-up you had open comes back
       this.clock.paused = true;
-      if (!this.ui.queue.some((d) => d.id === "P20")) this.ui.queue.unshift(this.flow.pauseDialog());
+      if (!this.ui.queue.some((d) => d.id === "P20")) this.ui.interrupt(this.flow.pauseDialog());
       return;
     }
     this.flow.openPause();
@@ -321,6 +322,9 @@ class Game {
     if (view.status !== "running") return this.flow.openEnd();
     if (view.day_state === "DAY_SUMMARY") return this.flow.openSummary();
     if (view.day_state === "MORNING_PLANNING" && view.time < 5.01) this.flow.openMorning();
+    // v15: the first day you run SnackBots yourself, explain the machines (once)
+    const ws = view.work_shop;
+    if (ws && P[ws] && P[ws].machines && view.shops[ws].owner === "player" && !view.shops[ws].manager) this.flow.explainSnackbots(ws);
     this.focus();
   }
 
@@ -637,6 +641,14 @@ class Game {
       arrow.position.set(this.player.pos.x + Math.sin(ang) * 1.4, 0.07, this.player.pos.z + Math.cos(ang) * 1.4);
       arrow.rotation.set(-Math.PI / 2, 0, ang + Math.PI);
     } else arrow.visible = false;
+    // v15: while you run SnackBots, every machine that needs you is marked, not only the next one
+    const extra = w.markers.extra || [];
+    const todo = this.flow.machinesToVisit();
+    extra.forEach((r, i) => {
+      const m = todo[i];
+      r.visible = !!m && !(target && dist2(m.front, target) < 0.5);
+      if (r.visible) { r.position.set(m.front.x, 0.055, m.front.z); const k = 1 + Math.sin(now / 300 + i) * 0.1; r.scale.set(k, k, k); }
+    });
   }
 
   updateLabels() {
@@ -649,6 +661,7 @@ class Game {
         ui.placeLabel(hintEl, new THREE.Vector3(this.currentHint.pos.x, 2.5, this.currentHint.pos.z), this.camera, W, H);
       }
       const now = performance.now();
+      var bubbles = []; // eslint-disable-line no-var
       for (const a of this.flow.agents.values()) {
         if (!a.figure.visible || dist2(a.pos, this.player.pos) > 40) continue;
         if (a.emote && a.emote.until > now) {
@@ -667,8 +680,18 @@ class Game {
           pat = `<div class="patience"><div style="width:${f * 100}%;background:${f > 0.5 ? "#2f9e5b" : f > 0.25 ? "#f2c94c" : "#d9534f"}"></div></div>`;
         } else if (a.mode === "served") pat = `<div class="serving">being served</div>`;
         const n = items.length + (a.soldOut || []).length;
-        const e = ui.label("b" + a.id, `<div class="stack">${pat}<div class="bubble n${Math.min(3, n)}" style="position:relative">${icons}</div></div>`);
+        // v15: the place in the queue, and the first in line is drawn on top of the others
+        const qi = a.mode === "queue" || a.mode === "served" ? (this.flow.queues[a.shop] || []).indexOf(a.id) : -1;
+        const badge = qi >= 0 ? `<span class="qpos">${qi + 1}</span>` : "";
+        const e = ui.label("b" + a.id, `<div class="stack">${pat}<div class="bubble n${Math.min(3, n)}" style="position:relative">${badge}${icons}</div></div>`);
         ui.placeLabel(e, new THREE.Vector3(a.pos.x, 2.15, a.pos.z), this.camera, W, H);
+        bubbles.push({ e, rank: qi >= 0 ? qi : 50 + dist2(a.pos, this.player.pos) });
+      }
+      // v15: SnackBots machines show what they hold while you run the shop
+      for (const m of this.flow.machineTags()) {
+        if (dist2(m.pos, this.player.pos) > 45) continue;
+        const e = ui.label("m" + m.id, `<div class="machine-tag ${m.cls}">${m.html}</div>`);
+        ui.placeLabel(e, new THREE.Vector3(m.pos.x, 2.6, m.pos.z), this.camera, W, H);
       }
       // v6: what the staff are doing right now (making coffee, pressing juice, cleaning)
       for (const [shop, w] of Object.entries(this.workers)) {
@@ -681,7 +704,27 @@ class Game {
     }
     if (this.screen === "game" && this.view) this.eggs.labels(ui, W, H);
     ui.endLabels();
-    if (this.screen === "game" && this.view) this.liftHint();
+    if (this.screen === "game" && this.view) { this.declutter(bubbles || []); this.liftHint(); }
+  }
+
+  // v15: order bubbles in a queue never cover each other: the first in line keeps its place
+  // and is drawn on top, the ones behind move up until they are free
+  declutter(list) {
+    if (list.length < 2) return;
+    list.sort((a, b) => a.rank - b.rank);
+    const placed = [];
+    for (const { e } of list) {
+      if (e.style.display === "none") continue;
+      e.style.zIndex = String(500 - placed.length);
+      let r = e.getBoundingClientRect();
+      for (let k = 0; k < 6; k++) {
+        const hit = placed.find((b) => !(r.right < b.left + 2 || r.left > b.right - 2 || r.bottom < b.top + 2 || r.top > b.bottom - 2));
+        if (!hit) break;
+        e.style.top = `${parseFloat(e.style.top) - (r.bottom - hit.top) - 4}px`;
+        r = e.getBoundingClientRect();
+      }
+      placed.push(r);
+    }
   }
 
   // v14: the "E ..." hint never covers a customer's order bubble: it moves up above it
@@ -705,8 +748,19 @@ class Game {
     // the others for 2.5 s (ghost), so groups never block each other for good.
     for (const a of [...this.flow.agents.values(), ...Object.values(this.workers)]) { // v11: managers too
       if (!a.figure.visible || !a.path.length) { a.stuckSince = null; continue; }
-      if (!a.lastCheck || now - a.lastCheck.t > 1000) {
-        if (a.lastCheck && dist2(a.pos, a.lastCheck) < 0.04 && this.clock.running) a.ghostUntil = now + 2500;
+      if (!a.lastCheck || now - a.lastCheck.t > 700) {
+        if (a.lastCheck && dist2(a.pos, a.lastCheck) < 0.04 && this.clock.running) {
+          a.ghostUntil = now + 2500;
+          // v15: stuck again and again (a group around the same spot): find a new way there
+          a.stuckCount = (a.stuckCount || 0) + 1;
+          if (a.stuckCount >= 3 && a.path.length && !(a instanceof StaffAgent)) {
+            const goal = a.path[a.path.length - 1];
+            const off = { x: goal.x + (Math.random() - 0.5) * 1.2, z: goal.z + (Math.random() - 0.5) * 1.2 };
+            const np = this.world.findPath(a.pos, a.mode === "wandering" ? off : goal);
+            if (np.length) a.path = np;
+            a.stuckCount = 0;
+          }
+        } else a.stuckCount = 0;
         a.lastCheck = { x: a.pos.x, z: a.pos.z, t: now };
       }
     }
@@ -726,7 +780,9 @@ class Game {
         // aside of the one standing, two walking ones both give way (a stuck one goes ghost)
         const staffPair = a instanceof StaffAgent && b instanceof StaffAgent;
         if (a.ghostUntil > now || b.ghostUntil > now) continue; // stuck for a second: may pass (last resort)
-        if (staffPair && (a.path.length || b.path.length)) { // v11: managers slide past each other sideways (no head-on deadlock)
+        // v11: managers slide past each other sideways (no head-on deadlock)
+        // v15: everybody who walks does, so two people never push straight against each other
+        if (a.path.length || b.path.length) {
           const sx = nx - nz * 0.6, sz = nz + nx * 0.6, l = Math.hypot(sx, sz); nx = sx / l; nz = sz / l;
         }
         const aFix = staffPair ? !a.path.length : a.anchored && a.anchored(), bFix = staffPair ? !b.path.length : b.anchored && b.anchored();

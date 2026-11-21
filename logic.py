@@ -888,9 +888,17 @@ def _end_day(state) -> dict:
             for spot in spots:
                 spots[spot] = True  # the manager finishes the job (also when nobody watched)
         else:
-            _change_reputation(state, CONFIG["reputation"]["cleaning_missed"])  # v10: per shop you left dirty
+            _change_reputation(state, CONFIG["reputation"]["cleaning_missed"], "cleaning")  # v10: per shop you left dirty
     spoiled_value = 0
     spoiled = {}
+    # v15: what you had today per product = sold + what is still left tonight (before the
+    # spoilage below). The summary chart shows it next to the plan: you can sell more than
+    # you planned (leftovers, extra purchases), but never more than you had.
+    available: dict[str, int] = {}
+    for shop in owned_shops(state):
+        for p in SHOPS[shop]["products"]:
+            left = portions(state, shop, p) or 0
+            available[p] = available.get(p, 0) + state["stats"]["shops"][shop]["sold"].get(p, 0) + left
     for shop in owned_shops(state):
         kept = []
         for batch in state["shops"][shop]["stock"]:
@@ -946,6 +954,9 @@ def _end_day(state) -> dict:
         "sold": sold,
         # v11: the plan of every shop (managers' proposals too), so "sold vs. plan" is never 0
         "plan": _sum_plans(day_plan_by_shop(state)),
+        "available": {p: n for p, n in available.items() if n},  # v15
+        "partly": sum(stats["shops"][s].get("partly", 0) for s in owned_shops(state)),  # v15
+        "rep_sources": dict(stats.get("rep_sources", {})),  # v15: why the reputation changed today
         "market_zones": market_zones(state),
         "served": sum(stats["shops"][s]["served"] for s in owned_shops(state)),
         "lost": sum(stats["shops"][s]["lost"] for s in owned_shops(state)),
@@ -977,7 +988,35 @@ def _end_day(state) -> dict:
     state["closed"] = True
     if state["money"] <= 0:
         state["status"] = GAME_OVER
+        state["end_reason"] = "bankrupt"
+    elif is_stuck(state):
+        state["status"] = GAME_OVER
+        state["end_reason"] = "stuck"  # v15
     return {"summary": summary}
+
+
+def is_stuck(state: dict) -> bool:
+    """v15: game over although some cash is left: nothing can be sold or bought any more.
+
+    No portion left in any of your shops (storage, shelves, machines), nothing in the bag or
+    the cart, no cash waiting in a vending machine or in your pocket, and less money than the
+    cheapest wholesale item your shops can use. Then no day can bring money again."""
+    # the cheapest wholesale item that one of your shops can use (one piece of it already
+    # makes a portion to sell)
+    usable = {i for shop in owned_shops(state) for p in SHOPS[shop]["products"] for i in PRODUCTS[p]["uses"]}
+    cheapest = min((ITEMS[i]["price"] for i in usable if i in ITEMS), default=0)
+    if state["money"] >= cheapest or state["bag"] or state["cart"] or state.get("carried_cash", 0):
+        return False
+    for shop in owned_shops(state):
+        data = state["shops"][shop]
+        if data["stock"] or any(b.get("units", 0) for batches in data.get("front", {}).values() for b in batches):
+            return False
+        for m in data.get("mech", {}).get("machines", {}).values():
+            if m.get("cash") or any(m.get("stock", {}).values()):
+                return False
+        if any(portions(state, shop, p) for p in SHOPS[shop]["products"]):
+            return False
+    return True
 
 
 def _sum_plans(plans: dict) -> dict:
@@ -1331,6 +1370,7 @@ def _ev_join_queue(state, ev):
     if state["closed"] or not shop_open_now(state, ev["shop"]):
         return _decide(state, student["id"], exclude={ev["shop"]})
     st.transition(student, "join_queue")
+    student.pop("sold_out_items", None)  # v15: a new visit starts without disappointments
     return {}
 
 
@@ -1355,6 +1395,8 @@ def _counter_check(state, student: dict, shop: str) -> dict | None:
     # here with the other café and with keeping the money. Whatever is worth most wins.
     if decision["action"] == "shop" and decision["shop"] == shop:
         st.transition(student, "join_queue")  # stays at the counter with the new order
+        # v15: remembered for the handover ("partly happy customer", no plus)
+        student["sold_out_items"] = sorted(set(student.get("sold_out_items", [])) | set(sold_out))
         # v10: still a disappointed customer (Mercado: the product was not on the shelf)
         delta = _sold_out_penalty(state, student, partial=True) if state["shops"][shop]["owner"] == "player" else 0
         return {"items": decision["items"], "sold_out": sold_out, "rep_delta": delta,
@@ -1434,7 +1476,7 @@ def _ev_reject(state, ev):
     delta = 0
     if state["shops"].get(shop, {}).get("owner") == "player":
         state["stats"]["shops"][shop]["rejected"] = state["stats"]["shops"][shop].get("rejected", 0) + 1
-        delta = _change_reputation(state, CONFIG["reputation"]["rejected"])
+        delta = _customer_reputation(state, CONFIG["reputation"]["rejected"], "rejected")
     result = _decide(state, student["id"], exclude={shop})
     result["rep_delta"] = delta
     return result
@@ -1481,23 +1523,30 @@ def _sell(state, shop: str, student: dict, products: list[str], tip: bool = True
     return amount
 
 
-def _change_reputation(state, delta: float) -> float:
-    """Change the reputation (0-100). Returns the real change."""
+def _change_reputation(state, delta: float, source: str | None = None) -> float:
+    """Change the reputation (0-100). Returns the real change.
+
+    v15: ``source`` books the change for the day summary ("why did my reputation change?")."""
     before = state["reputation"]
     state["reputation"] = max(0, min(100, before + delta))
-    return state["reputation"] - before
+    real = state["reputation"] - before
+    if source:
+        book = state["stats"].setdefault("rep_sources", {})
+        book[source] = round(book.get(source, 0) + real, 2)
+    return real
 
 
-def _customer_reputation(state, delta: float) -> float:
-    """v13: change the reputation for a customer who waited too long or was served by a manager.
+def _customer_reputation(state, delta: float, source: str = "customers") -> float:
+    """Change the reputation for a customer of one of your shops (v13, v15: all of them).
 
-    Both share one daily budget of +-``customer_daily_cap`` (net, counted in ``stats``,
-    which start fresh every morning): a gain first makes up for the day's losses. So one
-    shop full of impatient customers cannot crash the reputation to 0, and hundreds of
-    happy manager customers cannot push it from 0 to 100 in a day."""
+    Served by you or by a manager, partly served, waited too long or found it sold out:
+    every customer shares one daily budget of +-``customer_daily_cap`` (net, counted in
+    ``stats``, which start fresh every morning). A gain first makes up for the day's losses
+    and the other way round, so the reputation follows the balance of happy and unhappy
+    customers, but one day cannot crash it to 0 or push it to 100."""
     cap = CONFIG["reputation"]["customer_daily_cap"]
     net = state["stats"].get("customer_rep_net", 0.0)
-    delta = _change_reputation(state, max(-cap - net, min(cap - net, delta)))
+    delta = _change_reputation(state, max(-cap - net, min(cap - net, delta)), source)
     state["stats"]["customer_rep_net"] = net + delta
     return delta
 
@@ -1519,19 +1568,28 @@ def _ev_handover(state, ev):
     amount = _sell(state, shop, student, delivered, tip=correct) if delivered else 0
     tip = state.pop("last_tip", 0) if delivered else 0
     rep = CONFIG["reputation"]
-    if correct:
+    partly = correct and bool(student.get("sold_out_items"))
+    if partly:
+        # v15: the order was complete, but something the customer wanted was sold out. He
+        # already cost reputation at the counter; no plus on top (it was +2 before).
+        state["stats"]["shops"][shop]["partly"] = state["stats"]["shops"][shop].get("partly", 0) + 1
+        delta = 0
+        names = ", ".join(PRODUCTS[p]["name"] for p in student["sold_out_items"])
+        toast = f"Partly happy customer: +{euro(amount)} ({names} was sold out)"
+    elif correct:
         fast = (state["time"] - order["accepted_at"]) * 60 <= T["fast_service_minutes"]
-        delta = _change_reputation(state, rep["correct_order"] + (rep["fast_bonus"] if fast else 0))
+        delta = _customer_reputation(state, rep["correct_order"] + (rep["fast_bonus"] if fast else 0), "served")
         toast = f"Happy customer: +{euro(amount)}" + (f" (+{euro(tip)} tip)" if tip else "")
     else:
         state["stats"]["shops"][shop]["wrong"] += 1
-        delta = _change_reputation(state, rep["wrong_order"])
+        delta = _customer_reputation(state, rep["wrong_order"], "wrong")
         toast = f"Wrong order - unhappy customer (+{euro(amount)})"
     st.transition(student, "served")
     student["intent"] = None
+    student.pop("sold_out_items", None)
     state["current_order"] = None
     state["tray"] = []
-    return {"toast": toast, "amount": amount, "tip": tip, "correct": correct, "rep_delta": delta}
+    return {"toast": toast, "amount": amount, "tip": tip, "correct": correct, "partly": partly, "rep_delta": delta}
 
 
 def _ev_patience_expired(state, ev):
@@ -1542,7 +1600,7 @@ def _ev_patience_expired(state, ev):
     state["stats"]["shops"][shop]["lost"] += 1
     delta = 0
     if state["shops"][shop]["owner"] == "player":
-        delta = _customer_reputation(state, CONFIG["reputation"]["customer_lost"])
+        delta = _customer_reputation(state, CONFIG["reputation"]["customer_lost"], "waited")
     if state["current_order"] and state["current_order"]["student"] == student["id"]:
         state["current_order"] = None
         state["tray"] = []
@@ -1558,12 +1616,8 @@ def _sold_out_penalty(state, student: dict, to_competitor: bool = False, partial
     Going to a competitor instead costs more than simply going home."""
     student["disappointed"] = True
     key = "sold_out_partial" if partial else "sold_out_to_competitor" if to_competitor else "sold_out_left"
-    # at most this much per day, so one bad day cannot destroy the whole reputation
-    lost = state["stats"].get("sold_out_rep", 0)
-    delta = max(CONFIG["reputation"][key], -(CONFIG["reputation"]["sold_out_daily_cap"] - lost))
-    delta = _change_reputation(state, delta)
-    state["stats"]["sold_out_rep"] = lost - delta
-    return delta
+    # v15: in the one daily budget of all customers (it had its own -15 cap before)
+    return _customer_reputation(state, CONFIG["reputation"][key], "partly" if partial else "sold_out")
 
 
 def _ev_discard_tray(state, ev):
@@ -1613,7 +1667,7 @@ def _ev_cancel_order(state, ev):
     state["stats"]["wasted"] = state["stats"].get("wasted", 0) + len(state["tray"])
     state["current_order"] = None
     state["tray"] = []
-    delta = _change_reputation(state, CONFIG["reputation"]["order_cancelled"])
+    delta = _customer_reputation(state, CONFIG["reputation"]["order_cancelled"], "cancelled")
     st.transition(student, "give_up")
     result = _decide(state, student["id"], exclude={shop})
     result.update({"toast": "Order cancelled - the customer leaves", "student": student["id"], "rep_delta": delta})
@@ -1631,6 +1685,17 @@ def _ev_auto_serve(state, ev):
     student = _student(state, ev["student"])
     if student["status"] != st.QUEUING or not student["intent"] or student["intent"]["shop"] != shop:
         raise GameError("This student is not waiting here.")
+    # v15: the vending machine in front of him is out of order: he cannot buy anything (the
+    # message said "the machine is empty" before)
+    machines = state["shops"][shop].get("mech", {}).get("machines", {})
+    if ev.get("machine") in machines and machines[ev["machine"]].get("broken"):
+        delta = 0
+        if state["shops"][shop]["owner"] == "player":
+            state["stats"]["shops"][shop]["lost"] += 1
+            delta = _customer_reputation(state, CONFIG["reputation"]["machine_broken"], "broken")
+        st.transition(student, "served")
+        student["intent"] = None
+        return {"items": [], "amount": 0, "tip": 0, "broken": True, "rep_delta": delta}
     items, missing = [], []
     for p in student["intent"]["items"]:
         if can_make(state, shop, p):
@@ -1650,10 +1715,11 @@ def _ev_auto_serve(state, ev):
             state["stats"]["shops"][shop]["sold_out"] = state["stats"]["shops"][shop].get("sold_out", 0) + 1
             delta = _sold_out_penalty(state, student)
         elif not missing:
-            # v5: happy customers of your manager also improve the reputation
-            delta = _customer_reputation(state, CONFIG["reputation"]["staff_served"])
+            # v5: happy customers of your manager also improve the reputation (v15: as much as yours)
+            delta = _customer_reputation(state, CONFIG["reputation"]["staff_served"], "served")
         else:
             delta = _sold_out_penalty(state, student, partial=True)  # v10: got only part of it
+            state["stats"]["shops"][shop]["partly"] = state["stats"]["shops"][shop].get("partly", 0) + 1
     st.transition(student, "served")
     student["intent"] = None
     return {"items": items, "amount": amount, "tip": tip, "rep_delta": delta}
@@ -1798,7 +1864,9 @@ def _ev_collect_cash(state, ev):
     if not amount:
         raise GameError("The cash box is empty.")
     state["carried_cash"] = state.get("carried_cash", 0) + amount
-    return {"toast": f"Collected {euro(amount)} - bring it to the office", "amount": amount}
+    # v15: say clearly that the money is not in the account yet
+    return {"toast": f"Collected {euro(amount)} - not in your account yet: bring it to the SnackBots office board",
+            "amount": amount}
 
 
 def _ev_deposit_cash(state, ev):
@@ -1867,7 +1935,9 @@ def _ev_checkout(state, ev):
     shop = ev.get("shop")
     if mechanics.of(shop).service != "checkout":
         raise GameError("This shop has no checkout.")
-    _ev_accept(state, ev)
+    res = _ev_accept(state, ev)
+    if res.get("leaves"):  # v15: everything sold out while he waited: he leaves (no crash)
+        return res
     for product in list(state["current_order"]["items"]):
         _consume(state, shop, product)
         state["tray"].append(product)
@@ -2050,6 +2120,7 @@ def view(state: dict) -> dict:
         "day": state["day"],
         "time": state["time"],
         "status": state["status"],
+        "end_reason": state.get("end_reason"),  # v15: "bankrupt" or "stuck"
         "day_state": state["day_state"],
         "objective": objective(state),
         "money": state["money"],
