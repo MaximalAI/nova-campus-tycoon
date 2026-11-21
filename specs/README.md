@@ -20,3 +20,4 @@ One spec per version. Each spec says **Why** (the problem), **What** (the change
 | `v13-playtest-bug-fixes.md` | v13 | Manager plans and shared budgets, reputation cap, calm sea, objectives |
 | `v14-world-ui-and-performance.md` | v14 | NPCs avoid obstacles, beach props, legal notice, sold-out orders, performance |
 | `v15-reputation-snackbots-docs.md` | v15 | Flicker fix, one reputation rule for all customers, SnackBots guidance, game over when stuck, full documentation |
+| `v16-bubbles-and-info-i.md` | v16 | Order bubbles show only the products and stay at the same height, one style for the "i" buttons |

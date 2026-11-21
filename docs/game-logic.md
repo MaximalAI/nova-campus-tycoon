@@ -271,5 +271,5 @@ Rules: `logic.objective`, `mechanics.*.objective`, `game/js/flow.js` (`objective
 
 - The HUD always shows the next objective (Python writes it from the state; a shop mechanic can replace it, for example SnackBots reminds you of the cash you carry).
 - A yellow ring on the ground and an arrow next to the player point to the next place (planning board, wholesaler stand, storage, counter, cleaning spot). At SnackBots every machine that needs you gets an extra orange ring.
-- Every action opens a numbered pop-up (P01 to P47). Only one pop-up is shown at a time; others wait in a queue. The "E ..." hint never covers an order bubble, and customers in a queue show their place (1, 2, 3 ...) in their order bubble, the first in line drawn on top (v15).
+- Every action opens a numbered pop-up (P01 to P47). Only one pop-up is shown at a time; others wait in a queue. The "E ..." hint never covers an order bubble, and every order bubble shows only the products and stays at the same height above its customer; where bubbles overlap, the first in line is drawn on top (v16).
 - The "i" next to the stock (v15) opens the full stock list of every shop (storage with best-before days, shelves, vending machines, bag, carried cash); the "i" next to the day gain opens the statistics.

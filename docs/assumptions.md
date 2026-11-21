@@ -180,3 +180,6 @@ Decisions that the brief left open or that came up during implementation. Change
 - Game over "stuck" is checked at the end of the day with the cheapest wholesale item that one of your shops can use (one piece of it already makes a sellable portion).
 - The SnackBots explanation (P46) is shown once per browser (kept in the browser's local storage).
 - The headless simulation cleans after closing like a real player.
+
+## v16 changes
+- Overlapping order bubbles are accepted: a fixed height above every customer reads better than bubbles that move up and build a tower in a long queue. The drawing order (first in line on top) keeps the next order readable.

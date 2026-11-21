@@ -680,10 +680,9 @@ class Game {
           pat = `<div class="patience"><div style="width:${f * 100}%;background:${f > 0.5 ? "#2f9e5b" : f > 0.25 ? "#f2c94c" : "#d9534f"}"></div></div>`;
         } else if (a.mode === "served") pat = `<div class="serving">being served</div>`;
         const n = items.length + (a.soldOut || []).length;
-        // v15: the place in the queue, and the first in line is drawn on top of the others
+        // v16: no queue number in the bubble, only the products; the first in line is drawn on top
         const qi = a.mode === "queue" || a.mode === "served" ? (this.flow.queues[a.shop] || []).indexOf(a.id) : -1;
-        const badge = qi >= 0 ? `<span class="qpos">${qi + 1}</span>` : "";
-        const e = ui.label("b" + a.id, `<div class="stack">${pat}<div class="bubble n${Math.min(3, n)}" style="position:relative">${badge}${icons}</div></div>`);
+        const e = ui.label("b" + a.id, `<div class="stack">${pat}<div class="bubble n${Math.min(3, n)}" style="position:relative">${icons}</div></div>`);
         ui.placeLabel(e, new THREE.Vector3(a.pos.x, 2.15, a.pos.z), this.camera, W, H);
         bubbles.push({ e, rank: qi >= 0 ? qi : 50 + dist2(a.pos, this.player.pos) });
       }
@@ -707,24 +706,11 @@ class Game {
     if (this.screen === "game" && this.view) { this.declutter(bubbles || []); this.liftHint(); }
   }
 
-  // v15: order bubbles in a queue never cover each other: the first in line keeps its place
-  // and is drawn on top, the ones behind move up until they are free
+  // v16: every bubble stays at the same height above its customer (no tower of bubbles in a long
+  // queue); only the drawing order changes: the first in line is on top, then the nearest
   declutter(list) {
-    if (list.length < 2) return;
     list.sort((a, b) => a.rank - b.rank);
-    const placed = [];
-    for (const { e } of list) {
-      if (e.style.display === "none") continue;
-      e.style.zIndex = String(500 - placed.length);
-      let r = e.getBoundingClientRect();
-      for (let k = 0; k < 6; k++) {
-        const hit = placed.find((b) => !(r.right < b.left + 2 || r.left > b.right - 2 || r.bottom < b.top + 2 || r.top > b.bottom - 2));
-        if (!hit) break;
-        e.style.top = `${parseFloat(e.style.top) - (r.bottom - hit.top) - 4}px`;
-        r = e.getBoundingClientRect();
-      }
-      placed.push(r);
-    }
+    list.forEach(({ e }, i) => { e.style.zIndex = String(500 - i); });
   }
 
   // v14: the "E ..." hint never covers a customer's order bubble: it moves up above it

@@ -326,8 +326,11 @@ button.chip.toggle:disabled { opacity: .45; cursor: default; }
 .note.rep-why .up { color: var(--green-dark); font-weight: 800; }
 .note.rep-why .neg { color: var(--red); font-weight: 800; }
 /* v15: stock info button, carried cash, machine tags, queue numbers */
+/* v16: the same "i" as the day gain button (italic serif, white on dark green); the Stock heading is
+   uppercase with letter spacing, so both are switched off here or the "i" turns into an "I" */
 #stock-info { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 6px; border-radius: 50%;
-  border: none; padding: 0; background: var(--green); color: #fff; font: 800 11px/1 inherit; cursor: pointer; pointer-events: auto; vertical-align: 1px; }
+  border: none; padding: 0; background: var(--green-dark); color: #fff; -webkit-text-fill-color: #fff;
+  font: italic 800 11px/1 Georgia, serif; text-transform: none; letter-spacing: 0; cursor: pointer; pointer-events: auto; vertical-align: 1px; }
 #carry { margin-top: 8px; padding: 6px 10px; border-radius: 10px; background: #ffe8a3; color: #5a3d00; font-weight: 800; font-size: 13px;
   animation: carryPulse 1.4s ease-in-out infinite; }
 @keyframes carryPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 169, 77, 0.0); } 50% { box-shadow: 0 0 0 5px rgba(255, 169, 77, 0.45); } }
@@ -336,7 +339,5 @@ button.chip.toggle:disabled { opacity: .45; cursor: default; }
   padding: 3px 8px; font-size: 12px; font-weight: 800; color: #3d2f22; box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
 .machine-tag.need { background: #ffe0b3; }
 .machine-tag.broken { background: #ffd0cc; color: #8b1e14; }
-.bubble .qpos { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-right: 4px; border-radius: 50%;
-  background: #3d2f22; color: #fff; font: 800 10px/1 sans-serif; vertical-align: middle; }
 ol.howto { margin: 4px 0 6px 18px; padding: 0; line-height: 1.5; }
 ol.howto li { margin: 3px 0; }

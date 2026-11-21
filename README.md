@@ -4,7 +4,7 @@ A 3D café management game on the Nova SBE campus in Carcavelos. You start with 
 
 **Play it:** <https://www.novacampustycoon.com>. Create an account with your e-mail address on the landing page; every account has its own saved games.
 
-Course project for *Introduction to Programming*, Nova SBE (2026). Current version: **v15**.
+Course project for *Introduction to Programming*, Nova SBE (2026). Current version: **v16**.
 
 ## Team
 | Name | Student number |
@@ -116,14 +116,14 @@ Python (3.12 or newer), Streamlit 1.67 (v2 component), SQLite, pytest, ruff, uv;
 | `docs/`, `specs/` | Documentation (see above) |
 
 ## Deployment (Render)
-- Web service on Render, Python runtime, branch of the current version (v15).
+- Web service on Render, Python runtime, branch of the current version (v16).
 - Build: `uv sync --frozen && uv cache prune --ci`
 - Start: `uv run streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true`
 - Persistent disk at `/var/data` and `NCT_DB_PATH=/var/data/game.db`, so accounts and saves survive deploys.
 - Domain `www.novacampustycoon.com` (Namecheap DNS: `A @ 216.24.57.1`, `CNAME www nova-campus-tycoon.onrender.com`).
 
 ## Versions
-Every version is its own Git branch (`v2` ... `v15`); the spec of each version explains why and what changed.
+Every version is its own Git branch (`v2` ... `v16`); the spec of each version explains why and what changed.
 
 | Version | Main change |
 |---|---|
@@ -137,6 +137,7 @@ Every version is its own Git branch (`v2` ... `v15`); the spec of each version e
 | v13 | Playtest fixes: manager plans and budgets, reputation cap, surf waves |
 | v14 | World fixes, legal notice, sold-out orders, performance |
 | v15 | Flicker fix, one reputation rule for all customers, SnackBots guidance, game over when stuck, full documentation |
+| v16 | Order bubbles show only the products and stay at the same height, one style for the "i" buttons |
 
 ## Legal notice
 The legal notice (Impressum) with the team, the contact person and a disclaimer opens from the landing page footer and from the title menu. Rules for coding agents: `AGENTS.md`.
