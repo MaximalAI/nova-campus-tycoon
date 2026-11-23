@@ -2,9 +2,23 @@
 
 A 3D café management game on the Nova SBE campus in Carcavelos. You start with one small café and €50. Every day you plan, shop at the wholesaler, set prices and serve students at the counter. With the profit you buy upgrades, hire managers and buy out the competition shop by shop, until all nine shops on the campus and at the beach are yours: the monopoly.
 
-**Play it:** <https://www.novacampustycoon.com>. Create an account with your e-mail address on the landing page; every account has its own saved games.
+| | |
+|---|---|
+| **Play it** | <https://www.novacampustycoon.com> (no installation needed) |
+| **Trailer** | <https://youtu.be/eLGSOJ-wjVY> (60 seconds) |
+| **Pitch deck** | [`docs/pitch/Nova_Campus_Tycoon_Pitch.pdf`](docs/pitch/Nova_Campus_Tycoon_Pitch.pdf) (team, live demos, appendix with the architecture and every game rule) |
+| **Source code** | this repository; the default branch `v16` is the current version |
 
-Course project for *Introduction to Programming*, Nova SBE (2026). Current version: **v16**.
+Group project for *Introduction to Programming*, Nova SBE (2026). Current version: **v16**.
+
+## Objectives
+**Project objectives.** Build a complete, playable application in Python and document it so that a reader understands it without running it:
+- Model a small economy in Python: supply (planning, wholesale buying, stock that ages), demand (students who choose by price, value and reputation), money, reputation and competition.
+- Keep every rule in plain, tested Python (`logic.py`, `mechanics.py`, `students.py`) and use the browser only to draw and animate (Three.js): "Python decides, the browser animates".
+- Save every game safely in SQLite, with player accounts, so it can be played online by many people.
+- Work in small, reviewable steps: one Git branch and one written spec per version (v1 to v16), automated tests for every rule.
+
+**Game objective.** Start with one café and €50 and build a coffee monopoly: plan, buy, price and serve every day, hire managers and buy all nine shops on the campus and at the beach without going bankrupt.
 
 ## Team
 | Name | Student number |
@@ -15,6 +29,8 @@ Course project for *Introduction to Programming*, Nova SBE (2026). Current versi
 | Jan Andreas Hoffmann | 81217 |
 | Jonas Vasterling | 66801 |
 
+**How we worked.** The whole history of the project is in this repository: every version is its own branch (`v1` ... `v16`) with a written spec in `specs/` (why, what, out of scope), and every commit message lists what changed. Ideas, bug lists and playtests of each version went into the next spec; the code was pushed from one account. The pitch deck (`docs/pitch/`) and the trailer show the result.
+
 ## Documentation: where to start
 
 Read in this order to understand the whole project without opening the code:
@@ -24,14 +40,40 @@ Read in this order to understand the whole project without opening the code:
 3. **`docs/architecture.md`:** how it is built: Python decides every rule, the browser (Three.js) only animates; how one player action travels from the browser through Streamlit to the rules and back; modules, the 48 events, storage, security, performance, hosting, and why this design.
 4. **`docs/testing.md`:** how the ~355 automated tests work, what each test file proves, the balance simulation, and what was checked by playing.
 5. **`docs/product-brief-v2.md`:** the original product decisions and design principles (source of truth for the ideas; `docs/game-logic.md` describes the current rules in detail).
-6. **`specs/`:** one spec per version (Why / What / Out of scope / Done when); `specs/README.md` lists them. `docs/assumptions.md` lists decisions we made where the brief was open.
+6. **`docs/pitch/Nova_Campus_Tycoon_Pitch.pdf`** and the [trailer](https://youtu.be/eLGSOJ-wjVY): the game in short, two live demos, and an appendix with the architecture and every rule.
+7. **`specs/`:** one spec per version (Why / What / Out of scope / Done when); `specs/README.md` lists them. `docs/assumptions.md` lists decisions we made where the brief was open.
 
-## Run the app locally
+## How to run the application
+### Option 1: just open our link (recommended)
+The game is hosted online under our own domain, so there is nothing to install:
+
+1. Open **<https://www.novacampustycoon.com>** in a desktop browser (Chrome, Safari, Firefox or Edge; a mouse and keyboard are needed).
+2. Create an account with any e-mail address and a password (8 characters or more), or log in.
+3. Click **New game**. The game guides you through the first day with pop-ups and an objective in the top bar.
+
+Every account keeps its own saved game; "Continue" brings you back where you left off.
+
+### Option 2: run it on your own computer
+**Installation**
+1. Install Python 3.12 or newer and [uv](https://docs.astral.sh/uv/) (the package manager we use):
+   ```bash
+   # macOS / Linux
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   # Windows (PowerShell)
+   powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+   ```
+2. Get the code and install the dependencies (uv reads `pyproject.toml` and `uv.lock`):
+   ```bash
+   git clone https://github.com/MaximalAI/nova-campus-tycoon.git   # checks out the current version (v16)
+   cd nova-campus-tycoon
+   uv sync
+   ```
+
+**Run**
 ```bash
-uv sync
 uv run streamlit run app.py
 ```
-The game opens in the browser (full window). It needs an internet connection because Three.js is loaded from a CDN. Locally the database is `data/game.db` (change it with the environment variable `NCT_DB_PATH`).
+Streamlit opens the game at <http://localhost:8501>. It needs an internet connection because Three.js is loaded from a CDN. Locally the database is `data/game.db` (change it with the environment variable `NCT_DB_PATH`).
 
 ## Run the tests
 ```bash
@@ -123,7 +165,7 @@ Python (3.12 or newer), Streamlit 1.67 (v2 component), SQLite, pytest, ruff, uv;
 - Domain `www.novacampustycoon.com` (Namecheap DNS: `A @ 216.24.57.1`, `CNAME www nova-campus-tycoon.onrender.com`).
 
 ## Versions
-Every version is its own Git branch (`v2` ... `v16`); the spec of each version explains why and what changed.
+Every version is its own Git branch (`v2` ... `v16`); the default branch is the current version. The spec of each version explains why and what changed.
 
 | Version | Main change |
 |---|---|
